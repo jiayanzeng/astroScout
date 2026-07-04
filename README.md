@@ -1,0 +1,91 @@
+# AstroScout — v0.6
+
+An observation-planning & deep-sky knowledge copilot for amateur astronomers.
+Tell it your location; it ranks what's worth observing/imaging tonight **and explains
+why**, lets you save sessions and log what you saw, and answers astronomy questions
+through an AI copilot grounded in real planning data **and a cited literature corpus**.
+
+A working vertical slice — real astropy planning + a pgvector RAG knowledge base → API
+→ web UI with auth + persistence → a grounded, auditable AI copilot. Everything is
+built and tested; you supply ADS / OpenAI / Supabase keys to run it.
+
+## What's in it
+
+- **Planning engine** (`apps/api`) — astronomical dark window, per-target peak
+  altitude / hours-visible / moon separation, plus an **offline Bortle (light
+  pollution) lookup** (precomputed grid, O(1)) folded into scoring by each object's
+  surface-brightness sensitivity, so rankings flip between dark sites and cities.
+  Endpoints take an optional future `when`; coords are bounds-validated. Pure scorer
+  and Bortle model are unit-tested.
+- **Knowledge base / RAG** (`apps/api/rag` + `supabase/`) — ingest ADS literature
+  abstracts → chunk → embed (`text-embedding-3-small`) → pgvector. Retrieval is
+  **hybrid**: Postgres full-text + vector, fused with Reciprocal Rank Fusion
+  (`hybrid_search` RPC), then a **cross-encoder rerank** (Cohere or LLM) over the
+  top candidates — robust to both exact identifiers and paraphrase.
+- **Auth + persistence** — Supabase magic-link auth, Postgres + row-level security,
+  saved **sessions** and logged **observations**.
+- **Web UI** — ranked-target table with save/log, sessions list + detail, copilot.
+- **AI copilot** — Vercel AI SDK with three tools: `planNight`, `getTargetDetail`,
+  and `searchKnowledge`. The chat UI shows exactly what the copilot queried and what
+  came back — including cited literature sources — so answers are auditable.
+- **Eval harness** (`apps/web/evals`) — retrieval metrics (hit@k, recall@k, MRR,
+  nDCG) + answer-faithfulness scoring over a labelled dataset, comparing sparse vs
+  dense vs hybrid retrieval. Runs offline (no keys) or live; pure metrics + RRF
+  fusion are unit-tested in CI. The harness drove real decisions: it showed hybrid
+  most robust across query types, and that a bag-of-words reranker regresses vs
+  hybrid — so reranking uses a true cross-encoder, not a cheap stand-in.
+
+## Stack
+
+FastAPI + astropy/astroplan/numpy · Next.js 16 / React 19 / Tailwind v4 / shadcn ·
+Vercel AI SDK v6 · Supabase (auth + Postgres + pgvector + RLS) · OpenAI embeddings.
+
+## Run it
+
+```bash
+# 1. Supabase — see supabase/README.md
+#    create a project, run migrations 0001_init.sql then 0002_knowledge.sql, enable email auth
+
+# 2. Backend
+cd apps/api
+uv sync
+cp ../../.env.example ../../.env          # ADS/OpenAI/Supabase keys for ingestion; CORS has a default
+uv run uvicorn astroscout_api.main:app --reload   # http://127.0.0.1:8000/docs
+uv run python scripts/ingest_knowledge.py --all   # populate the knowledge base (optional, for /chat grounding)
+
+# 3. Frontend (repo root, second terminal)
+pnpm install
+cp apps/web/.env.example apps/web/.env.local      # Supabase URL/anon key + OPENAI_API_KEY
+pnpm --filter @astroscout/web dev                 # http://localhost:3000
+```
+
+`/plan` works without an account. Signing in unlocks saving sessions and logging
+observations. `/chat` needs `OPENAI_API_KEY`; grounded answers need the knowledge base ingested.
+
+## Tests / checks (mirrors CI)
+
+```bash
+# api
+cd apps/api && uv run ruff check . && uv run mypy src && uv run pytest -m "not integration"
+# web (repo root)
+pnpm --filter @astroscout/web lint && pnpm --filter @astroscout/web typecheck \
+  && pnpm --filter @astroscout/web test && pnpm --filter @astroscout/web build
+```
+
+Tests hitting live CDS/Simbad, ADS, or OpenAI are marked `integration` and excluded from CI.
+
+## Layout
+
+```
+apps/api      FastAPI: planning engine, data adapters, RAG ingestion, validation script
+apps/web      Next.js: auth, /plan, /sessions, /chat copilot (plan + knowledge tools)
+supabase      schema + RLS + pgvector migrations, setup notes
+.github       CI (api + web jobs)
+```
+
+## Honest scope notes (deliberately not in this slice)
+
+- Higher-fidelity light pollution: swap the modeled grid for a real World Atlas / VIIRS raster.
+- Local cross-encoder reranker (e.g. bge-reranker) as a no-vendor option; per-passage chunk dedup.
+- Per-target rise/set times surfaced in the UI (computed internally already).
+- Background/scheduled ingestion (currently a manual CLI run).

@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "name": "astroscout",
+  "packageManager": "pnpm@11.8.0"
+}

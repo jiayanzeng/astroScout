@@ -1,0 +1,44 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest -m "not integration"
+
+  # Auto-activates once apps/web/package.json exists. Installs from the workspace
+  # root (single pnpm-lock.yaml) and targets the web package with --filter.
+  web:
+    runs-on: ubuntu-latest
+    if: hashFiles('apps/web/package.json') != ''
+    env:
+      # CI installs deps explicitly below, so skip pnpm's pre-run auto-install check.
+      npm_config_verify_deps_before_run: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @astroscout/web lint
+      - run: pnpm --filter @astroscout/web typecheck
+      - run: pnpm --filter @astroscout/web test
+      - run: pnpm --filter @astroscout/web build

@@ -1,0 +1,1 @@
+"""AstroScout API package."""
