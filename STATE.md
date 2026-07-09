@@ -422,9 +422,15 @@ relay path (item 2). Open work, in order:
    VIIRS raster (downsampled to a `uint8 (720,1440)` 0.25° `.npy` at the same path/
    orientation) — *zero code change*. This also fixes the city-core quantization
    (NYC currently reads 7, not 9).
-5. **Surface `light_sensitivity` in the web UI** so users see *why* a galaxy dropped in
-   ranking (the data is already in each plan row). Add a **date picker** to `/plan` to
-   exercise the `when` param (the API supports it; the UI doesn't send it yet).
+5. ✅ **Surface `light_sensitivity` in the web UI + date picker (Done 2026-07-10).**
+   `light_sensitivity` column added to `/plan` table (badge: robust/moderate/fragile
+   with numeric tooltip; thresholds ≤0.3/≤0.6/>0.6). Date picker wired to `when` param
+   (native `<input type="date">`, re-fetches on change, 422 surfaced inline). Dark-window
+   dusk/dawn UTC displayed in the plan card. `ApiError` class added to `api.ts` to
+   preserve backend status codes through the proxy. `lightSensitivityTier` in `format.ts`
+   with unit tests (32 total, +3). `RankedTarget` gains `light_sensitivity: number`;
+   `fetchNightPlan`/`fetchTargetDetail` accept optional `when`; plan proxy reads and
+   passes `when`. No new dependencies.
 6. **Retrieval polish** (A/B in the harness first): per-passage chunk dedup; a local
    no-vendor cross-encoder (e.g. bge-reranker) as a third `rerankPassages` backend.
 7. **Copilot faithfulness in CI-adjacent form.** `OpenAIJudge` exists; wire a small

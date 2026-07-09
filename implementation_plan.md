@@ -1,116 +1,186 @@
 # Implementation Plan
 
 [Overview]
-Add a `rerank?: boolean` option to `searchKnowledge` and split `LiveRetriever` into two constructor-flagged variants so the live eval harness can isolate the cross-encoder reranker's lift over raw hybrid search.
+Surface `light_sensitivity` in the `/plan` results table and wire a date picker to the API's `when` param, making the light-pollution-aware ranking legible and enabling future-night planning — all frontend-only with no new dependencies.
 
-`STATE.md` §5 item 3 identifies the blocker: `LiveRetriever` wraps `searchKnowledge`, which fuses `hybrid_search` RPC + `rerankPassages` into a single call — so the live comparison cannot separate hybrid retrieval quality from reranker quality. The fix is minimal and surgical: (1) `searchKnowledge` gains an optional third parameter `opts?: { rerank?: boolean }` defaulting to `true` (production behavior unchanged, `ai.ts` tool call signature untouched); when `rerank: false`, it returns the top-5 `hybrid_search` candidates directly with the RPC's similarity scores. (2) `LiveRetriever` gains a `rerank` constructor flag producing two named variants: `pgvector-hybrid(live)` (no rerank) and `pgvector-hybrid+rerank(live)` (rerank). (3) `run.ts` runs both live variants side-by-side when keys are present; offline behavior (no keys) is byte-identical to today. No tuning is done — the harness reports whatever it measures (STATE.md §2 rule 1).
+The API (`rank_targets` in `planning.py`) already returns `light_sensitivity: number` (0–1) in each target row and already accepts a `when` query param (`YYYY-MM-DD` or full ISO; date-only is biased to the upcoming evening; invalid → 422). However, the web layer does neither: `RankedTarget` in `src/lib/api.ts` is missing the `light_sensitivity` field, `fetchNightPlan`/`fetchTargetDetail` don't accept or pass `when`, the proxy `app/api/plan/route.ts` doesn't read `when`, and `PlanClient.tsx` has no date picker and no LP-sensitivity column. This plan threads `when` through the full web stack (fetcher → proxy → UI), adds a compact "LP sens." badge column that makes ranking flips legible (a Bortle 7 user can SEE why galaxies sank), adds a native `<input type="date">` that re-fetches on change, and surfaces the dark-window dusk/dawn UTC timestamps so users can confirm which night was planned. A 422 from an invalid date is surfaced as a friendly inline error message.
 
-The change set touches three source files (`knowledge.ts`, `retriever.ts`, `run.ts`) and updates `STATE.md` annotations. No new files, no dependency changes, no new tests (the changed paths are live/network-gated and can't run in CI). Web CI (`tsc --noEmit`, `eslint .`, `vitest run`, `next build`) must stay green, and the offline eval table (`tsx evals/run.ts`) must be unchanged.
+The approach is surgical: (1) add `light_sensitivity` to the `RankedTarget` type and an `ApiError` class to preserve HTTP status through the proxy; (2) thread an optional `when` param through `fetchNightPlan`/`fetchTargetDetail` and the plan proxy route; (3) add a pure `lightSensitivityTier` helper to `format.ts` (unit-tested per STATE.md §2 rule 2) and render it as a shadcn `Badge` in a new table column; (4) add a date input + dusk/dawn display to `PlanClient.tsx`. Server/client component boundaries are unchanged (`page.tsx` stays a server component, `PlanClient.tsx` stays `"use client"`, `actions.ts` stays `"use server"`). The AI tools in `ai.ts` call `fetchNightPlan(lat, lon)` without `when` — the optional param defaults to undefined (tonight), so no caller changes are needed. No new dependencies; `pnpm-lock.yaml` is not modified.
 
 [Types]
-One new optional parameter type is added; no existing types change.
+One existing type gains a field; one new error class and one new tier type are added; two function signatures gain an optional parameter.
 
-- **`SearchKnowledgeOptions`** (inline, in `apps/web/src/lib/knowledge.ts`): `{ rerank?: boolean }`. Optional object passed as the third argument to `searchKnowledge`. When `undefined` or when `rerank` is `undefined`/`true`, behavior is the current production path (embed → hybrid_search(15) → rerankPassages(5)). When `rerank === false`, the top-5 `hybrid_search` candidates are returned directly with the RPC's similarity scores, bypassing `rerankPassages` entirely.
-- **`searchKnowledge` signature**: changes from `(query: string, target?: string) => Promise<KnowledgePassage[]>` to `(query: string, target?: string, opts?: { rerank?: boolean }) => Promise<KnowledgePassage[]>`. The third parameter is optional and omitted by all existing callers (`ai.ts`, `retriever.ts`), so no caller signature changes are required.
-- **`LiveRetriever` constructor**: gains a `rerank: boolean = true` constructor parameter. The `name` field changes from a hardcoded string literal to a computed value based on the flag. No interface change — `LiveRetriever` still `implements Retriever`.
-- **`KnowledgePassage`**: unchanged (`{ target, title, source, bibcode, url, content, similarity }`).
-- **`RetrievedPassage`**: unchanged (`Pick<KnowledgePassage, "target" | "content" | "similarity">`).
-- **`Retriever` interface**: unchanged.
+- **`RankedTarget`** (in `apps/web/src/lib/api.ts`): gains `light_sensitivity: number`. The field is already returned by the API (0.0–1.0, where 0 = robust to light pollution, 1 = fragile). This is an additive change — all existing consumers (`PlanClient.tsx`, `TargetDetail` via `& RankedTarget`) are unaffected.
+  ```ts
+  export type RankedTarget = {
+    name: string;
+    common_name: string;
+    kind: string;
+    score: number;
+    rating: "poor" | "marginal" | "good";
+    peak_altitude_deg: number;
+    hours_visible: number;
+    moon_separation_deg: number;
+    light_sensitivity: number;  // NEW — 0=robust, 1=fragile
+  };
+  ```
+
+- **`ApiError`** (new class, in `apps/web/src/lib/api.ts`): extends `Error` with a `status: number` field so the proxy route can distinguish a backend 422 from a 502. `ApiError extends Error` means existing `e instanceof Error` checks in other routes still work.
+  ```ts
+  export class ApiError extends Error {
+    constructor(public status: number, message: string) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  ```
+
+- **`LightSensitivityTier`** (new type, in `apps/web/src/lib/format.ts`): `"robust" | "moderate" | "fragile"`. Used by `lightSensitivityTier()` and to select the Badge variant in `PlanClient.tsx`.
+
+- **`fetchNightPlan` signature**: changes from `(lat: number, lon: number) => Promise<NightPlan>` to `(lat: number, lon: number, when?: string) => Promise<NightPlan>`. The third parameter is optional and omitted by all existing callers (`ai.ts`, the plan proxy), so no caller changes are required. When `when` is undefined/empty, it is not added to the query params — today's behavior is untouched.
+
+- **`fetchTargetDetail` signature**: changes from `(name: string, lat: number, lon: number) => Promise<TargetDetail>` to `(name: string, lat: number, lon: number, when?: string) => Promise<TargetDetail>`. Same optional-param pattern. Only caller is `ai.ts` which omits it.
+
+- **`NightPlan`**: unchanged (already has `dusk_utc`, `dawn_utc`, `bortle`, `dark_hours`, `moon_illumination`, `targets`).
+- **`TargetDetail`**: unchanged structurally, but inherits `light_sensitivity` from `RankedTarget` via `& RankedTarget`.
+- **`Visibility`**: unchanged.
 
 [Files]
-Three existing source files are modified; one documentation file is updated; no files are created, deleted, or moved.
+Four existing source files are modified; one test file is extended; one documentation file is updated. No files are created, deleted, or moved.
 
-- **Modified:** `apps/web/src/lib/knowledge.ts`
-  - Add a third optional parameter `opts?: { rerank?: boolean }` to `searchKnowledge`.
-  - After the `hybrid_search` RPC call and the `candidates` cast (line 42), add a conditional: `if (opts?.rerank === false) return candidates.slice(0, 5);` before the `rerankPassages` call.
-  - The `rerankPassages(query, candidates, 5)` call (line 43) remains as the default/fallthrough path.
-  - The `match_count: 15` RPC parameter is unchanged — both paths retrieve 15 candidates; the no-rerank path simply slices to 5 instead of reranking. This keeps the RPC call identical and the change minimal.
-  - The `KnowledgePassage` type, the embed call, and the Supabase client creation are unchanged.
+- **Modified:** `apps/web/src/lib/api.ts`
+  - Add `light_sensitivity: number` to the `RankedTarget` type (after `moon_separation_deg`).
+  - Add `ApiError` class (exported) extending `Error` with a `status: number` field.
+  - Update `get<T>`: on `!res.ok`, parse the response body for a FastAPI `detail` field (fall back to raw body), and throw `new ApiError(res.status, message)` instead of `new Error(...)`. This preserves the HTTP status and gives cleaner error messages.
+  - Update `fetchNightPlan`: add optional `when?: string` third parameter; build params as `{ lat, lon }` and conditionally add `when` only when truthy (empty/undefined → omitted → tonight).
+  - Update `fetchTargetDetail`: add optional `when?: string` fourth parameter; same conditional-add pattern.
+  - `fetchVisibility`: unchanged (visibility endpoint has no `when` param).
 
-- **Modified:** `apps/web/evals/retriever.ts`
-  - `LiveRetriever` class: add a `constructor(private readonly rerank = true)` and change `readonly name` from `"pgvector+rerank(live)"` to a computed value: `this.rerank ? "pgvector-hybrid+rerank(live)" : "pgvector-hybrid(live)"`.
-  - In `retrieve()`, change `await searchKnowledge(query)` to `await searchKnowledge(query, undefined, { rerank: this.rerank })`.
-  - Update the JSDoc comment from "the real pgvector + hybrid + rerank path" to "the real pgvector hybrid path; rerank flag controls whether rerankPassages is applied".
-  - All other classes (`LexicalRetriever`, `DenseRetriever`, `HybridRetriever`) and module-level constants are unchanged.
+- **Modified:** `apps/web/src/app/api/plan/route.ts`
+  - Read `when` from `searchParams` (may be null).
+  - Pass `when ?? undefined` to `fetchNightPlan(lat, lon, when ?? undefined)`.
+  - In the `catch` block, check `e instanceof ApiError`: if true, return `NextResponse.json({ error: e.message }, { status: e.status })` (preserves 422); otherwise return 502 as today. Import `ApiError` from `@/lib/api`.
 
-- **Modified:** `apps/web/evals/run.ts`
-  - Update the header comment: `# live: pgvector vs hybrid(sparse+pgvector)` → `# live: pgvector-hybrid vs pgvector-hybrid+rerank`.
-  - Change `const dense: Retriever = live ? new LiveRetriever() : new DenseRetriever();` to `const dense: Retriever = live ? new LiveRetriever(true) : new DenseRetriever();` (explicit rerank=true for the rerank variant).
-  - Change the live branch of the `retrievers` ternary from `[dense]` to `[new LiveRetriever(false), dense]` — runs the no-rerank baseline first, then the rerank variant.
-  - The offline branch `[sparse, dense, hybrid, new RerankedRetriever(hybrid, new LexicalReranker())]` is unchanged — offline behavior is byte-identical.
-  - The Braintrust push block is unchanged; it pushes the last retriever's results, which in live mode is the `pgvector-hybrid+rerank(live)` variant (the production path).
+- **Modified:** `apps/web/src/lib/format.ts`
+  - Add `LightSensitivityTier` type: `"robust" | "moderate" | "fragile"`.
+  - Add `lightSensitivityTier(sensitivity: number): LightSensitivityTier`:
+    - `sensitivity <= 0.3` → `"robust"`
+    - `sensitivity <= 0.6` → `"moderate"`
+    - `sensitivity > 0.6` → `"fragile"`
+  - Existing `ratingLabel` function is unchanged.
+
+- **Modified:** `apps/web/src/lib/__tests__/format.test.ts`
+  - Add a `describe("lightSensitivityTier")` block with tests:
+    - `≤ 0.3` → `"robust"` (test 0, 0.15, 0.3)
+    - `0.3 < x ≤ 0.6` → `"moderate"` (test 0.31, 0.55, 0.6)
+    - `> 0.6` → `"fragile"` (test 0.61, 0.9, 1.0)
+  - Existing `ratingLabel` tests are unchanged.
+
+- **Modified:** `apps/web/src/app/plan/PlanClient.tsx`
+  - Import `lightSensitivityTier` from `@/lib/format`.
+  - Add `when` state: `const [when, setWhen] = useState("");` (empty = tonight).
+  - Modify `runPlan` to accept an optional `whenOverride?: string` parameter: `const w = whenOverride ?? when;`. Build `URLSearchParams({ lat, lon })` and conditionally `params.set("when", w)` only when `w` is non-empty. Change the button's `onClick` from `onClick={runPlan}` to `onClick={() => runPlan()}` (since `runPlan` now takes an optional string param — a raw `onClick={runPlan}` would pass the click event as the first argument).
+  - Add a date input to the form row: `<Input type="date" value={when} onChange={...} />`. On change: `setWhen(e.target.value)` and auto-call `runPlan(e.target.value)` if `lat` and `lon` are non-empty. Use `flex-wrap` on the form container so it wraps gracefully on mobile.
+  - Add a "LP sens." column header (`<th>`) after "Moon sep" and before the optional Log column.
+  - Add a `<td>` for each target row: render a `<Badge>` with the tier text and a `title` attribute showing the numeric value (e.g., `title="Light pollution sensitivity: 0.90 (0=robust, 1=fragile)"`). Map tier to Badge variant: `robust` → `"good"` (emerald), `moderate` → `"marginal"` (amber), `fragile` → `"poor"` (muted). This reuses the existing shadcn `Badge` variants — no changes to `badge.tsx`.
+  - Display the dark window: add a line below the `CardTitle` in the plan card showing `plan.dusk_utc` and `plan.dawn_utc` truncated to 16 chars (YYYY-MM-DD HH:MM) with a "UTC" suffix, e.g., `"2026-07-10 08:32 → 2026-07-10 18:45 UTC"`. This lets users confirm which night was planned.
+  - Error display is unchanged (`{error && <p className="text-destructive text-sm">{error}</p>}`) — 422 messages from the backend (e.g., "invalid datetime '...'") will surface here via the proxy.
 
 - **Modified:** `STATE.md`
-  - §1 file tree annotation for `retriever.ts`: update the NOTE from "LiveRetriever wraps searchKnowledge → hybrid+rerank is one black box; no live no-rerank baseline yet (§5 item 3)" to note that `LiveRetriever` now has a constructor flag producing `pgvector-hybrid(live)` (no rerank) and `pgvector-hybrid+rerank(live)` variants; `searchKnowledge` accepts `{ rerank?: boolean }`.
-  - §3 Web lib `knowledge.ts` line: update signature from `searchKnowledge(query,target?)` to `searchKnowledge(query,target?,opts?: {rerank?: boolean})` and note the no-rerank path returns top-5 hybrid candidates directly.
-  - §5 item 3: mark the harness change as done (the no-rerank live baseline exists); the live run to record numbers is still pending (requires keys).
+  - §5 item 5: mark as done (✅), noting: `light_sensitivity` column added to `/plan` table (badge: robust/moderate/fragile with numeric tooltip); date picker wired to `when` param (re-fetches on change, 422 surfaced inline); `fetchNightPlan`/`fetchTargetDetail` and the plan proxy pass `when` through; `ApiError` class added to preserve backend status codes through the proxy; `lightSensitivityTier` added to `format.ts` with unit tests; dark-window dusk/dawn UTC displayed in the plan card.
+  - §3 Web lib `api.ts` line: note `RankedTarget` now includes `light_sensitivity`; `fetchNightPlan`/`fetchTargetDetail` accept optional `when`; `ApiError` class added.
+  - §1 file tree annotation for `format.ts`: note `lightSensitivityTier` helper added.
 
-- **Not touched:** `apps/web/src/lib/ai.ts` (tool call `searchKnowledge(query, target)` — opts defaults to rerank:true, unchanged), `apps/web/src/lib/rerank.ts` (rerankPassages unchanged), `apps/web/src/app/api/chat/route.ts` (uses tools, not searchKnowledge directly), `apps/web/evals/rerank.ts`, `apps/web/evals/dataset.ts`, `apps/web/evals/metrics.ts`, `apps/web/evals/braintrust.ts`, test files, `package.json`, `tsconfig.json`, `vitest.config.ts`, `supabase/migrations/*`.
+- **Not touched:** `apps/web/src/lib/ai.ts` (tool calls omit `when` → defaults to tonight; no change needed), `apps/web/src/app/api/visibility/route.ts` (visibility endpoint has no `when`; `get<T>` now throws `ApiError` but the visibility proxy's `catch` still returns 502 via `e instanceof Error ? e.message : String(e)` — `ApiError extends Error` so this works; no code change needed), `apps/web/src/components/ui/badge.tsx` (existing variants reused), `apps/web/src/components/ui/input.tsx`, `apps/web/src/app/plan/page.tsx` (server component boundary unchanged), `apps/web/src/app/plan/actions.ts`, `apps/web/package.json`, `tsconfig.json`, `vitest.config.ts`, `eslint.config.mjs`, `pnpm-lock.yaml`, `supabase/migrations/*`.
 
 [Functions]
-One function signature changes (gains an optional parameter); one class method's internal call changes.
+Two function signatures change (gain optional parameters); one function's error-throwing behavior changes; one new pure function is added.
 
-- **Modified function:** `searchKnowledge` in `apps/web/src/lib/knowledge.ts`.
-  - Current signature: `searchKnowledge(query: string, target?: string): Promise<KnowledgePassage[]>`.
-  - New signature: `searchKnowledge(query: string, target?: string, opts?: { rerank?: boolean }): Promise<KnowledgePassage[]>`.
-  - New logic: after `const candidates = (data ?? []) as KnowledgePassage[];`, add `if (opts?.rerank === false) return candidates.slice(0, 5);`. The existing `return rerankPassages(query, candidates, 5);` follows as the default path.
-  - Effect: `opts` undefined or `opts.rerank` undefined/`true` → rerank (production behavior unchanged). `opts.rerank === false` → top-5 hybrid candidates with RPC similarity scores, no reranking.
+- **New function:** `lightSensitivityTier` in `apps/web/src/lib/format.ts`.
+  - Signature: `lightSensitivityTier(sensitivity: number): LightSensitivityTier`
+  - Logic: `≤ 0.3` → `"robust"`, `≤ 0.6` → `"moderate"`, `> 0.6` → `"fragile"`.
+  - Pure, deterministic, unit-tested (STATE.md §2 rule 2).
 
-- **Modified method:** `LiveRetriever.retrieve` in `apps/web/evals/retriever.ts`.
-  - Current: `const passages = await searchKnowledge(query);`.
-  - New: `const passages = await searchKnowledge(query, undefined, { rerank: this.rerank });`.
-  - Passes the constructor's `rerank` flag through to `searchKnowledge`.
+- **Modified function:** `fetchNightPlan` in `apps/web/src/lib/api.ts`.
+  - Current: `fetchNightPlan(lat: number, lon: number): Promise<NightPlan>` — calls `get<NightPlan>("/plan/night", { lat, lon })`.
+  - New: `fetchNightPlan(lat: number, lon: number, when?: string): Promise<NightPlan>` — builds params as `{ lat, lon }`, conditionally adds `when` when truthy, calls `get<NightPlan>("/plan/night", params)`. When `when` is undefined/empty, the params object is `{ lat, lon }` — byte-identical to today.
 
-- **New functions:** none.
+- **Modified function:** `fetchTargetDetail` in `apps/web/src/lib/api.ts`.
+  - Current: `fetchTargetDetail(name: string, lat: number, lon: number): Promise<TargetDetail>` — calls `get<TargetDetail>("/plan/target", { name, lat, lon })`.
+  - New: `fetchTargetDetail(name: string, lat: number, lon: number, when?: string): Promise<TargetDetail>` — same conditional-add pattern as `fetchNightPlan`.
+
+- **Modified function:** `get<T>` in `apps/web/src/lib/api.ts`.
+  - Current: throws `new Error(`API ${res.status}: ${await res.text()}`)` on `!res.ok`.
+  - New: reads the response body, attempts to parse JSON and extract `detail` (FastAPI's error format), falls back to raw body; throws `new ApiError(res.status, message)`. The `ApiError` extends `Error`, so existing `e instanceof Error` checks in other routes still work. The status code is preserved on the error object.
+
+- **Modified function:** `runPlan` in `apps/web/src/app/plan/PlanClient.tsx`.
+  - Current: `async function runPlan()` — builds `URLSearchParams({ lat, lon })`, fetches `/api/plan?${params}`.
+  - New: `async function runPlan(whenOverride?: string)` — resolves `const w = whenOverride ?? when;`, builds `URLSearchParams({ lat, lon })`, conditionally `params.set("when", w)` when `w` is non-empty. The rest (fetch, error handling, state updates) is unchanged.
+
+- **New functions:** `lightSensitivityTier` (above).
 - **Removed functions:** none.
-- **Unchanged but relevant:** `rerankPassages` in `src/lib/rerank.ts` (still called by `searchKnowledge` in the default path), `ai.ts` tool `execute: async ({ query, target }) => searchKnowledge(query, target)` (opts omitted → defaults to rerank:true).
+- **Unchanged but relevant:** `fetchVisibility` (no `when` param), `ratingLabel` in `format.ts` (unchanged), `saveSession`/`logObservation` in `actions.ts` (unchanged).
 
 [Classes]
-One class is modified (constructor + name computation); no new or removed classes.
+One new error class is added; no existing classes are structurally modified.
 
-- **Modified class:** `LiveRetriever` in `apps/web/evals/retriever.ts`.
-  - Current: `readonly name = "pgvector+rerank(live)";` (hardcoded), no constructor, `retrieve` calls `searchKnowledge(query)`.
-  - New: `constructor(private readonly rerank = true)` sets the rerank flag; `readonly name: string` is computed in the constructor as `this.rerank ? "pgvector-hybrid+rerank(live)" : "pgvector-hybrid(live)"`; `retrieve` calls `searchKnowledge(query, undefined, { rerank: this.rerank })`.
-  - Still `implements Retriever` with the same `retrieve(query, k)` signature.
-  - Default `new LiveRetriever()` produces the rerank variant (backward-compatible default).
+- **New class:** `ApiError` in `apps/web/src/lib/api.ts`.
+  - `class ApiError extends Error { constructor(public status: number, message: string) { super(message); this.name = "ApiError"; } }`
+  - Key methods: none (data carrier). Inherits `message` from `Error`.
+  - Inheritance: extends `Error`. This ensures `e instanceof Error` remains true in all existing catch blocks (visibility proxy, PlanClient catch).
+  - Exported so the plan proxy route can `import { ApiError }` and check `e instanceof ApiError`.
 
-- **New classes:** none.
+- **Modified classes:** none.
 - **Removed classes:** none.
-- **Unchanged classes:** `LexicalRetriever`, `DenseRetriever`, `HybridRetriever` (all in `retriever.ts`), `RerankedRetriever`, `LexicalReranker` (in `evals/rerank.ts`), `CohereReranker`, `LLMReranker` (in `src/lib/rerank.ts`).
+- **Unchanged classes:** `Badge` (in `badge.tsx`), `Input` (in `input.tsx`), `PlanClient` (function component, not a class — modified in place but no class structure change).
 
 [Dependencies]
 No dependency changes.
 
-No new packages, no version bumps, no lockfile changes. The `{ rerank?: boolean }` opts type is a plain TypeScript object literal — no zod schema or runtime validation needed (it's an internal API, not a user-facing input). The `ai.ts` tool input schema (`z.object({ query, target })`) is unchanged. `pnpm-lock.yaml` is not modified.
+No new packages, no version bumps, no lockfile changes. The `<input type="date">` is a native HTML element styled with the existing shadcn `Input` component — no datepicker library. The `ApiError` class is plain TypeScript. The `lightSensitivityTier` function is pure TypeScript. `pnpm-lock.yaml` is not modified. STATE.md rule 10 (no new dependencies) is respected.
 
 [Testing]
-No new tests are needed; existing tests must remain green. The changed paths (`searchKnowledge` with `rerank: false`, `LiveRetriever` variants) are live/network-gated (require OpenAI + Supabase keys) and cannot run in CI or the sandbox.
+One new test block is added; existing tests must remain green. The verification commands use direct `.bin` binaries per STATE.md §4 to dodge the sandbox pnpm-run quirk.
 
-- **Existing tests:** the 29 current web tests (metrics 12, faithfulness 7, fusion 4, rerank 3, format 3) are all offline/standalone and do not exercise `searchKnowledge` or `LiveRetriever`. They must remain green unchanged.
-- **Offline eval:** `tsx evals/run.ts` with no keys must produce the byte-identical offline table (lexical, dense, hybrid, hybrid→rerank(lexical)) — the `live` flag is false, so the `retrievers` array is unchanged.
-- **Live eval (manual, requires keys):** `OPENAI_API_KEY=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... tsx evals/run.ts` should now print two live retriever rows: `pgvector-hybrid(live)` and `pgvector-hybrid+rerank(live)`, side by side, showing whether the reranker helps or hurts.
+- **New tests:** `describe("lightSensitivityTier")` in `apps/web/src/lib/__tests__/format.test.ts`:
+  - `it("returns robust for ≤0.3")` — tests 0, 0.15, 0.3
+  - `it("returns moderate for 0.3<x≤0.6")` — tests 0.31, 0.55, 0.6
+  - `it("returns fragile for >0.6")` — tests 0.61, 0.9, 1.0
+  - Total: 3 new test cases (format tests go from 3 → 6; total web tests go from 29 → 32).
+
+- **Existing tests:** must remain green. The 29 current tests (metrics 12, faithfulness 7, fusion 4, rerank 3, format 3) are all offline/standalone and do not exercise `fetchNightPlan`, `get<T>`, or `PlanClient`. The `format.test.ts` changes are purely additive (new `describe` block; existing `ratingLabel` tests untouched).
+
+- **Type safety notes:**
+  - `ApiError` uses a TypeScript parameter property (`public status: number`) — strict-compatible.
+  - `fetchNightPlan`/`fetchTargetDetail` optional `when?: string` — callers that omit it (`ai.ts`) are unaffected.
+  - `lightSensitivityTier` returns a union type `"robust" | "moderate" | "fragile"` — used to index the Badge variant.
+  - The Badge `variant` prop accepts `"good" | "marginal" | "poor" | null | undefined`. The tier-to-variant mapping (`robust→"good"`, `moderate→"marginal"`, `fragile→"poor"`) must be type-safe. A ternary chain or a `Record<LightSensitivityTier, "good"|"marginal"|"poor">` map both work.
+
 - **Verification commands (run from `apps/web`, direct binaries per STATE.md §4):**
   ```
   node_modules/.bin/tsc --noEmit
   node_modules/.bin/eslint .
   node_modules/.bin/vitest run
-  node_modules/.bin/tsx evals/run.ts
   node_modules/.bin/next build
   ```
-  Expected: 0 type errors, 0 lint errors, 29 tests passed, offline eval table unchanged (4 retrievers: lexical/dense/hybrid/hybrid→rerank), build successful (12 routes).
-- **TypeScript strict notes:** `opts?.rerank === false` uses optional chaining — safe for `undefined` opts. The `LiveRetriever` constructor parameter `private readonly rerank = true` is a TypeScript parameter property (strict-compatible). The `name` field must be declared as `readonly name: string` (not `readonly name = "..."`) since it's assigned in the constructor.
-- **ESLint notes:** no new violations expected — the changes are small additions of optional parameters and constructor logic. The `eslint.config.mjs` flat config is unchanged.
+  Expected: 0 type errors, 0 lint errors, 32 tests passed (29 existing + 3 new), build successful (12 routes).
+
+- **Manual verification (requires running API + web dev server):**
+  - Load `/plan`, enter a Bortle 7 location (e.g., lat=40.71, lon=-74.01 for NYC), click "Rank targets" — the "LP sens." column should show "fragile" badges (red/muted) for galaxies and "robust" (green) for clusters.
+  - Pick a future date — the plan should re-fetch and the dark-window line should show the new night's dusk/dawn UTC.
+  - Type an invalid date via URL manipulation (e.g., `?when=2026-13-45`) — a 422 error message should appear inline.
 
 [Implementation Order]
 Numbered steps in execution order to minimize conflicts and ensure CI stays green.
 
-1. Edit `apps/web/src/lib/knowledge.ts`: add `opts?: { rerank?: boolean }` as the third parameter to `searchKnowledge`; add `if (opts?.rerank === false) return candidates.slice(0, 5);` before the `rerankPassages` call.
-2. Edit `apps/web/evals/retriever.ts`: add `constructor(private readonly rerank = true)` to `LiveRetriever`; change `readonly name` to a computed field set in the constructor (`this.rerank ? "pgvector-hybrid+rerank(live)" : "pgvector-hybrid(live)"`); change `searchKnowledge(query)` to `searchKnowledge(query, undefined, { rerank: this.rerank })`; update the JSDoc comment.
-3. Edit `apps/web/evals/run.ts`: update the header comment; change `new LiveRetriever()` to `new LiveRetriever(true)` in the `dense` ternary; change the live `retrievers` branch from `[dense]` to `[new LiveRetriever(false), dense]`.
-4. Run `apps/web/node_modules/.bin/tsc --noEmit` — expect 0 type errors.
-5. Run `apps/web/node_modules/.bin/eslint .` — expect 0 lint errors.
-6. Run `apps/web/node_modules/.bin/vitest run` — expect 29 tests passed.
-7. Run `apps/web/node_modules/.bin/tsx evals/run.ts` — expect the offline table unchanged (4 retrievers, same numbers as STATE.md §3).
-8. Run `apps/web/node_modules/.bin/next build` — expect build successful (12 routes).
-9. Update `STATE.md`: §1 file tree annotation for `retriever.ts`; §3 Web lib `knowledge.ts` signature; §5 item 3 mark harness change done.
-10. Confirm `git diff --stat` shows exactly: `apps/web/src/lib/knowledge.ts`, `apps/web/evals/retriever.ts`, `apps/web/evals/run.ts`, `STATE.md`.
+1. Edit `apps/web/src/lib/api.ts`: add `light_sensitivity: number` to `RankedTarget`; add `ApiError` class; update `get<T>` to throw `ApiError` with extracted detail; update `fetchNightPlan` and `fetchTargetDetail` to accept optional `when` and conditionally add it to params.
+2. Edit `apps/web/src/lib/format.ts`: add `LightSensitivityTier` type and `lightSensitivityTier` function.
+3. Edit `apps/web/src/lib/__tests__/format.test.ts`: add `describe("lightSensitivityTier")` block with 3 test cases.
+4. Edit `apps/web/src/app/api/plan/route.ts`: read `when` from searchParams; pass to `fetchNightPlan`; check `instanceof ApiError` in catch to preserve 422 status.
+5. Edit `apps/web/src/app/plan/PlanClient.tsx`: add `when` state; modify `runPlan` to accept `whenOverride` and include `when` in params; add date `<Input type="date">`; add "LP sens." column with Badge; add dark-window dusk/dawn display; change button `onClick` to `() => runPlan()`.
+6. Run `apps/web/node_modules/.bin/tsc --noEmit` — expect 0 type errors.
+7. Run `apps/web/node_modules/.bin/eslint .` — expect 0 lint errors.
+8. Run `apps/web/node_modules/.bin/vitest run` — expect 32 tests passed.
+9. Run `apps/web/node_modules/.bin/next build` — expect build successful (12 routes).
+10. Update `STATE.md`: §5 item 5 mark done; §3 `api.ts`/`format.ts` annotations; §1 file tree note.
+11. Confirm `git diff --stat` shows exactly: `apps/web/src/lib/api.ts`, `apps/web/src/lib/format.ts`, `apps/web/src/lib/__tests__/format.test.ts`, `apps/web/src/app/api/plan/route.ts`, `apps/web/src/app/plan/PlanClient.tsx`, `STATE.md`.

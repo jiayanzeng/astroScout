@@ -19,7 +19,18 @@ export type RankedTarget = {
   peak_altitude_deg: number;
   hours_visible: number;
   moon_separation_deg: number;
+  light_sensitivity: number;
 };
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 export type NightPlan = {
   dusk_utc: string;
@@ -37,7 +48,17 @@ async function get<T>(path: string, params: Record<string, string | number>): Pr
   const url = new URL(path, API_BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    let message = `API ${res.status}: ${body}`;
+    try {
+      const json = JSON.parse(body);
+      if (json.detail) message = String(json.detail);
+    } catch {
+      /* not JSON, use raw body */
+    }
+    throw new ApiError(res.status, message);
+  }
   return (await res.json()) as T;
 }
 
@@ -45,10 +66,14 @@ export function fetchVisibility(target: string, lat: number, lon: number): Promi
   return get<Visibility>("/visibility", { target, lat, lon });
 }
 
-export function fetchNightPlan(lat: number, lon: number): Promise<NightPlan> {
-  return get<NightPlan>("/plan/night", { lat, lon });
+export function fetchNightPlan(lat: number, lon: number, when?: string): Promise<NightPlan> {
+  const params: Record<string, string | number> = { lat, lon };
+  if (when) params.when = when;
+  return get<NightPlan>("/plan/night", params);
 }
 
-export function fetchTargetDetail(name: string, lat: number, lon: number): Promise<TargetDetail> {
-  return get<TargetDetail>("/plan/target", { name, lat, lon });
+export function fetchTargetDetail(name: string, lat: number, lon: number, when?: string): Promise<TargetDetail> {
+  const params: Record<string, string | number> = { name, lat, lon };
+  if (when) params.when = when;
+  return get<TargetDetail>("/plan/target", params);
 }
