@@ -29,7 +29,3 @@ pnpm-debug.log*
 
 # eval output
 apps/web/evals/report.json
-
-# What to do next
-cline_tasks.md
-cline_tasks_track_c.md

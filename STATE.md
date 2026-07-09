@@ -15,9 +15,11 @@ This document is the source of truth for a fresh session. Read it fully before e
 ADS `object:` queries now resolved via the ADS object service (`resolve_object_query`,
 +6 CI unit tests); `openai_base_url` added to `Settings` and honored by
 `rag/embeddings.py` (relay support, env-only on the web side); Supabase env fixed
-(bare project URL; service-role GRANTs). **Known regression:** the relay patch left
-`rag/embeddings.py` failing `ruff check` (E501) and `ruff format --check` — CI is
-red until §5 item 0 is done.
+(bare project URL; service-role GRANTs). The relay patch briefly left
+`rag/embeddings.py` failing `ruff check` (E501) + `ruff format --check`; that lint
+regression was fixed (§5 item 0, 2026-07-10) and CI is green again. Post-v0.6.1,
+Tasks 1–5 also landed (env anchoring, relay verification, live rerank numbers, UI) —
+see §5.
 
 ---
 
@@ -91,7 +93,6 @@ astroscout/
 │       │   ├── chunking.py            # PURE chunk_text (overlapping)  [unit-tested]
 │       │   ├── embeddings.py          # embed_texts via OpenAI-compatible /embeddings endpoint
 │       │   │                          #   (settings.openai_base_url, default api.openai.com/v1)
-│       │   │                          #   ⚠ currently fails ruff/format — §5 item 0
 │       │   ├── store.py               # upsert_documents via Supabase PostgREST (service role);
 │       │   │                          #   appends /rest/v1/documents — SUPABASE_URL must be bare
 │       │   └── ingest.py              # ingest_target / ingest_catalog (fetch→chunk→embed→store)
@@ -206,7 +207,7 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    instructs grounding via `searchKnowledge` and admitting when the corpus is empty.
 10. **No emojis/secrets in code; keep CI green.** `ruff`, `ruff format --check`, `mypy
     strict`, `pytest`, plus web `lint/typecheck/test/build` must all stay green.
-    (Currently violated by `rag/embeddings.py` — §5 item 0 is the blocker.)
+    (Green as of 2026-07-10; the transient `rag/embeddings.py` lint regression is fixed.)
 11. **Vendor endpoints are configuration, not code.** Relay/base-URL switching lives in
     env (`OPENAI_BASE_URL`) with the official endpoint as the in-code default. Never
     hardcode a relay URL; never commit `.env` / `.env.local`.
@@ -263,8 +264,9 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 - `embed_texts` resolves the endpoint at call time:
   `base_url = settings.openai_base_url or "https://api.openai.com/v1"`, then POSTs to
   `{base_url}/embeddings`. Unset → official API; set → relay. No other code touched.
-- ⚠ The patch as applied violates ruff E501 (over-long comment) + leaves trailing
-  whitespace — CI-red. Fix is mechanical (§5 item 0); do NOT change behavior.
+- Lint clean (fixed 2026-07-10, §5 item 0): the over-long comment was shortened to
+  ≤100 chars and trailing whitespace stripped; behavior unchanged (same base-URL
+  fallback, no logic touched).
 
 ### `datasources/planning.py`
 - `parse_when(str|None)->Time|None`: None/empty→None; date-only → append `T12:00:00`
@@ -341,13 +343,12 @@ Rerank lifts. Cohere not tested (no key).
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status (verified from this snapshot, fresh env):** API **40 unit tests
-  pass** (34 @ v0.6 + 6 new ADS-resolver tests), 10 deselected as integration; `mypy
-  src` clean. **BUT the api job is RED**: `ruff check` fails E501 and `ruff format
-  --check` would reformat `rag/embeddings.py` (over-long comment on the base-URL line
-  + trailing whitespace) — introduced by the 2026-07-02 relay patch. Fix first (§5
-  item 0). Web unchanged since v0.6 (env-only edits): **29 tests** (metrics 12,
-  faithfulness 7, fusion 4, rerank 3, format 3) + typecheck + lint + build (12 routes).
+- **Current status (verified 2026-07-10, fresh env): CI is green.** API **42 unit
+  tests pass** (34 @ v0.6 + 6 ADS-resolver + 2 config-anchoring from Task 1), 10
+  deselected as integration; `ruff check`, `ruff format --check`, and `mypy src` all
+  clean — the 2026-07-02 relay-patch lint regression in `rag/embeddings.py` is fixed
+  (§5 item 0). Web (Tasks 3a/4 landed): **32 tests** (metrics 12, faithfulness 7,
+  fusion 4, rerank 3, format 6) + typecheck + lint + build (12 routes).
 - **How to verify locally**:
   - API: from `apps/api`, `PYTHONPATH=src python -m pytest -m "not integration"`, plus
     `ruff check .`, `ruff format --check .`, `mypy src`.
@@ -395,13 +396,14 @@ Rerank lifts. Cohere not tested (no key).
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is currently red** (item 0). One latent config hazard (item 1) and one unverified
-relay path (item 2). Open work, in order:
+**CI is green.** Items 0, 1, 2, 3, and 5 are done (lint fix, env/config hardening,
+relay verification, live rerank measurement, UI). The remaining open work is the
+data / retrieval / catalog backlog — items 4, 6, 7, 8:
 
-0. **Restore CI green — fix `rag/embeddings.py` lint/format.** Shorten the over-long
-   comment (E501, >100 chars) and strip trailing whitespace; `ruff check .`,
-   `ruff format --check .`, `mypy src`, and the 40 unit tests must all pass. Behavior
-   must not change (same base-URL fallback). Mechanical, do first.
+0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
+   The over-long comment was shortened (now ≤100 chars) and trailing whitespace
+   stripped; `ruff check .`, `ruff format --check .`, `mypy src`, and the unit tests
+   (now 42) all pass. Behavior unchanged (same base-URL fallback).
 1. ✅ **Harden relay/env configuration (Done 2026-07-09).** (a) `OPENAI_BASE_URL=`
    added to root `.env.example` and `apps/web/.env.example` — the relay knob is now
    discoverable. (b) `Settings.model_config.env_file` anchored to the repo root via
