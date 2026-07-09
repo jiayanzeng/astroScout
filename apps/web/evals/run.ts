@@ -3,7 +3,7 @@
  *
  *   pnpm --filter @astroscout/web eval     # offline: sparse vs dense vs hybrid
  *   OPENAI_API_KEY=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
- *     pnpm --filter @astroscout/web eval   # live: pgvector vs hybrid(sparse+pgvector)
+ *     pnpm --filter @astroscout/web eval   # live: pgvector-hybrid vs pgvector-hybrid+rerank
  *
  * Writes evals/report.json. Optionally forwards to Braintrust when BRAINTRUST_API_KEY is set.
  */
@@ -78,10 +78,10 @@ async function main(): Promise<void> {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   const sparse = new LexicalRetriever();
-  const dense: Retriever = live ? new LiveRetriever() : new DenseRetriever();
+  const dense: Retriever = live ? new LiveRetriever(true) : new DenseRetriever();
   const hybrid = new HybridRetriever(sparse, dense);
   const retrievers: Retriever[] = live
-    ? [dense]
+    ? [new LiveRetriever(false), dense]
     : [sparse, dense, hybrid, new RerankedRetriever(hybrid, new LexicalReranker())];
 
   const exact = RETRIEVAL_DATASET.filter((c) => c.kind === "exact");

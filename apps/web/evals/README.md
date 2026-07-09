@@ -59,6 +59,25 @@ hybrid candidates then reranks to the top 5. Offline, the "dense" side and the r
 deterministic stand-ins so the run needs no keys; run with keys to measure the live
 cross-encoder lift over hybrid.
 
+## Live run (real pgvector + reranker, 2026-07-09)
+
+With 203 passage chunks ingested over 15 targets and the LLM reranker (gpt-4o-mini):
+
+```
+retriever                         recall@3  MRR  nDCG@5  reranker
+pgvector-hybrid(live)             0.36      0.43  0.45    —
+pgvector-hybrid+rerank(live)      0.57      0.57  0.61    llm (gpt-4o-mini)
+```
+
+**Rerank lifts** — the real cross-encoder improves recall@3 by +21pp and nDCG@5 by
++16pp over raw hybrid. The live run confirms the prod architecture choice that the
+offline stand-in could only predict (the offline bag-of-words reranker correctly
+showed that a weak reranker regresses). Cohere not tested (no key).
+
+Note: live recall@3 is lower than offline (0.57 vs 0.88) because the real pgvector
+embeddings retrieve from actual cited literature — the passages are about the right
+targets but don't always match the curated blurb-based query phrasing the dataset uses.
+
 ## Extending
 
 - Add cases to `RETRIEVAL_DATASET` in `dataset.ts`.

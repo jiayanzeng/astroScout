@@ -21,6 +21,7 @@ export type KnowledgePassage = {
 export async function searchKnowledge(
   query: string,
   target?: string,
+  opts?: { rerank?: boolean },
 ): Promise<KnowledgePassage[]> {
   const { embedding } = await embed({
     model: openai.embedding("text-embedding-3-small"),
@@ -40,5 +41,6 @@ export async function searchKnowledge(
   });
   if (error) throw new Error(error.message);
   const candidates = (data ?? []) as KnowledgePassage[];
+  if (opts?.rerank === false) return candidates.slice(0, 5);
   return rerankPassages(query, candidates, 5);
 }

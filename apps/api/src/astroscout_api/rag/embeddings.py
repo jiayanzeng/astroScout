@@ -12,8 +12,8 @@ def embed_texts(texts: list[str], api_key: str) -> list[list[float]]:
     """Embed a batch of texts. Returns one 1536-d vector per input, in order."""
     if not texts:
         return []
-    
-    # Dynamically Resolve Redirect URLs: Automatically falls back to the official OpenAI API if not configured.
+
+    # Resolve the endpoint at call time; unset -> official OpenAI API.
     base_url = settings.openai_base_url or "https://api.openai.com/v1"
     url = f"{base_url.rstrip('/')}/embeddings"
 

@@ -113,12 +113,18 @@ export class HybridRetriever implements Retriever {
   }
 }
 
-/** Live retriever: the real pgvector + hybrid + rerank path used by the copilot. Needs keys. */
+/** Live retriever: the real pgvector hybrid path; rerank flag controls whether
+ *  rerankPassages is applied. Needs keys. */
 export class LiveRetriever implements Retriever {
-  readonly name = "pgvector+rerank(live)";
+  readonly name: string;
+  constructor(private readonly rerank = true) {
+    this.name = this.rerank
+      ? "pgvector-hybrid+rerank(live)"
+      : "pgvector-hybrid(live)";
+  }
   async retrieve(query: string, k: number): Promise<RetrievedPassage[]> {
     const { searchKnowledge } = await import("../src/lib/knowledge");
-    const passages = await searchKnowledge(query);
+    const passages = await searchKnowledge(query, undefined, { rerank: this.rerank });
     return passages
       .slice(0, k)
       .map((p) => ({ target: p.target, content: p.content, similarity: p.similarity }));

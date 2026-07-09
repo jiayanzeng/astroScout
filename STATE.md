@@ -57,8 +57,7 @@ astroscout/
 ├── pnpm-workspace.yaml            # packages: apps/*, packages/*; onlyBuiltDependencies
 ├── pnpm-lock.yaml                 # committed — CI uses --frozen-lockfile
 ├── .npmrc                         # verify-deps-before-run=false (see §4)
-├── .env.example                   # API keys (ADS / OpenAI / Supabase / CORS)
-│                                  #   NOTE: OPENAI_BASE_URL not yet listed here (§5 item 1)
+├── .env.example                   # API keys (ADS / OpenAI / Supabase / CORS / OPENAI_BASE_URL)
 ├── justfile, .pre-commit-config.yaml, .python-version   # Week-1 dev tooling
 ├── .github/workflows/ci.yml       # api job + web job (see §4)
 │
@@ -73,7 +72,7 @@ astroscout/
 │       ├── main.py                    # FastAPI app: CORS + routers (health, visibility, planning)
 │       ├── config.py                  # Settings: ads_token, openai_api_key, openai_base_url,
 │       │                              #   supabase_url, supabase_service_key, cors_origins_raw
-│       │                              #   CAUTION: env_file=".env" is CWD-relative (§4 quirks)
+│       │                              #   env_file anchored to repo root (§4 quirks)
 │       ├── params.py                  # shared Annotated query types: Lat, Lon, When
 │       ├── scoring.py                 # PURE scorer + light-pollution linkage  ★core
 │       ├── bortle/                    # OFFLINE light-pollution lookup  ★core (v0.6)
@@ -140,8 +139,10 @@ astroscout/
 │       ├── faithfulness.ts (+test)    # claim split + score; MockJudge; judge-openai.ts (OpenAIJudge)
 │       ├── text.ts                    # tokens/stem/tf/cosineSparse
 │       ├── retriever.ts               # Lexical / Dense / Hybrid / Live retrievers
-│       │                              #   NOTE: LiveRetriever wraps searchKnowledge → hybrid+rerank
-│       │                              #   is one black box; no live no-rerank baseline yet (§5 item 3)
+│       │                              #   NOTE: LiveRetriever has a constructor flag producing
+│       │                              #   pgvector-hybrid(live) (no rerank) and
+│       │                              #   pgvector-hybrid+rerank(live) variants;
+│       │                              #   searchKnowledge accepts {rerank?: boolean}
 │       ├── rerank.ts (+test)          # LexicalReranker, RerankedRetriever
 │       ├── dataset.ts                 # 8 exact + 6 semantic labelled cases
 │       ├── run.ts                     # comparison runner (writes report.json; gitignored)
@@ -287,8 +288,10 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 ### Web `lib`
 - `api.ts` types: `NightPlan` now includes **`bortle:number`** (and `RankedTarget`,
   `TargetDetail`, `Visibility`). `fetchVisibility/fetchNightPlan/fetchTargetDetail`.
-- `knowledge.ts` `searchKnowledge(query,target?)`: embed (1536) → `supabase.rpc(
-  "hybrid_search", {query_text, query_embedding, match_count:15, filter_target})` →
+- `knowledge.ts` `searchKnowledge(query,target?,opts?: {rerank?: boolean})`: embed
+  (1536) → `supabase.rpc("hybrid_search", {query_text, query_embedding,
+  match_count:15, filter_target})`. When `opts.rerank === false` returns top-5 hybrid
+  candidates directly (RPC similarity scores); otherwise →
   `rerankPassages(query, candidates, 5)`. `KnowledgePassage` has `target,title,source,
   bibcode,url,content,similarity`.
 - `rerank.ts`: `rerankPassages` dispatches **Cohere** (if `COHERE_API_KEY`) → **LLM**
@@ -320,6 +323,14 @@ dense(offline)               0.80      0.82  0.81   (exact 0.75 / semantic 0.88)
 hybrid (RRF)                 0.88      0.86  0.88   ← best first stage; prod path
 hybrid -> rerank(lexical)    0.80      0.84  0.84   ← regresses (bag-of-words ≈ dense)
 ```
+
+### Live corpus numbers (pgvector hybrid, 203 chunks over 15 targets, 2026-07-09)
+```
+retriever                         recall@3  MRR  nDCG@5  reranker
+pgvector-hybrid(live)             0.36      0.43  0.45    —
+pgvector-hybrid+rerank(live)      0.57      0.57  0.61    llm (gpt-4o-mini)
+```
+Rerank lifts. Cohere not tested (no key).
 
 ---
 
@@ -367,10 +378,12 @@ hybrid -> rerank(lexical)    0.80      0.84  0.84   ← regresses (bag-of-words 
     (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`), `NODE_TLS_REJECT_UNAUTHORIZED=0` in
     `apps/web/.env.local` unblocks dev. **Local-only escape hatch — never commit or
     deploy it**; the clean fix is `NODE_EXTRA_CA_CERTS=<proxy-CA.pem>`.
-  - **pydantic-settings env_file is CWD-relative** (`env_file=".env"` resolves against
-    the process CWD at import). Copies of `.env` (e.g. root → `apps/api/`) go silently
-    stale when the source is later edited — this caused a 401 hunt. Durable fix
-    (anchor `env_file` to repo root with local override) is planned — §5 item 1.
+  - **pydantic-settings env_file anchored to repo root** (fixed 2026-07-09, §5 item 1).
+    Env-file paths are absolute, derived from `config.py`'s own location — no longer
+    dependent on the process CWD. The tuple `(_REPO_ROOT / ".env", apps/api/.env)` means
+    the repo-root `.env` is the default and `apps/api/.env` is a local override (later
+    tuple entry wins on pydantic-settings 2.14.2). Stale copies can no longer silently
+    override the intended keys.
 - **Sandbox quirks (NOT bugs; won't affect real CI)**:
   - `pnpm run`/`pnpm exec` trips a pre-run auto-install check due to a *global*
     supply-chain policy in this container → verify web via direct `.bin` binaries; real
@@ -389,28 +402,22 @@ relay path (item 2). Open work, in order:
    comment (E501, >100 chars) and strip trailing whitespace; `ruff check .`,
    `ruff format --check .`, `mypy src`, and the 40 unit tests must all pass. Behavior
    must not change (same base-URL fallback). Mechanical, do first.
-1. **Harden relay/env configuration.** (a) Add `OPENAI_BASE_URL=` (documented as
-   optional) to root `.env.example` and `apps/web/.env.example` so the relay knob is
-   discoverable — right now it exists only in gitignored env files. (b) Anchor
-   `Settings.model_config.env_file` to the repo root (e.g.
-   `Path(__file__).resolve().parents[4] / ".env"` in an env-file tuple, with a local
-   `apps/api/.env` taking priority) so loading no longer depends on CWD and stale
-   copies can't recur.
-2. **Verify the relay end-to-end on the web side.** Embeddings are proven; `/chat`
-   (`streamText`) and the LLM reranker (`generateObject`) use the default
-   `openai("gpt-4o-mini")`, which in AI SDK v6 targets the **Responses API**
-   (`/v1/responses`). Relays that only implement `/v1/chat/completions` will fail with
-   a stream-mismatch error; the fix the SDK itself suggests is `openai.chat("gpt-4o-mini")`
-   (also check `evals/judge-openai.ts`). Test against the configured relay; switch to
-   `.chat(...)` only if needed, keeping official-API compatibility.
-3. **Measure the live cross-encoder rerank lift.** Now unblocked (embedding auth
-   fixed; ingest path validated). Requires a small harness change first: `LiveRetriever`
-   wraps `searchKnowledge`, which fuses hybrid_search + rerank into one call — add a
-   no-rerank live baseline (e.g. a `rerank?: boolean` option or a direct
-   `hybrid_search` RPC variant) so hybrid vs hybrid+rerank is isolable. Then: run
-   migrations 0001–0003, `ingest_knowledge.py --all`, run `evals/run.ts` live
-   (`OPENAI_API_KEY` + Supabase, optionally `COHERE_API_KEY`) and record the numbers
-   here. This *confirms or refutes* the prod choice.
+1. ✅ **Harden relay/env configuration (Done 2026-07-09).** (a) `OPENAI_BASE_URL=`
+   added to root `.env.example` and `apps/web/.env.example` — the relay knob is now
+   discoverable. (b) `Settings.model_config.env_file` anchored to the repo root via
+   `(_REPO_ROOT / ".env", Path(__file__).resolve().parents[2] / ".env")` so loading no
+   longer depends on CWD and stale copies can't recur. Two CI-safe unit tests in
+   `test_config.py` assert the anchored shape and CWD-independence.
+2. ✅ **Verify the relay end-to-end on the web side (Done 2026-07-09).** Both
+   `streamText` (`/chat`) and `generateObject` (LLM reranker, `judge-openai.ts`) were
+   tested through the configured relay (`OPENAI_BASE_URL=https://www.dmxapi.cn/v1`) using
+   `openai("gpt-4o-mini")` (Responses API, `/v1/responses`). Both succeeded without code
+   changes — the relay supports the Responses API. No switch to `openai.chat(...)` needed.
+3. ✅ **Measure the live cross-encoder rerank lift (Done 2026-07-09).** Ingest: 203
+   chunks across 15 targets (no zeros). Live eval (LLM reranker, gpt-4o-mini):
+   hybrid recall@3=0.36 / MRR=0.43 / nDCG@5=0.45; hybrid+rerank recall@3=0.57 /
+   MRR=0.57 / nDCG@5=0.61. Rerank lifts — the prod choice is confirmed. Cohere not
+   tested (no key). Results recorded at §3.
 4. **Higher-fidelity light pollution.** Swap the modeled grid for a real World Atlas /
    VIIRS raster (downsampled to a `uint8 (720,1440)` 0.25° `.npy` at the same path/
    orientation) — *zero code change*. This also fixes the city-core quantization
