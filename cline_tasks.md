@@ -20,7 +20,7 @@ Every task prompt assumes Cline reads `STATE.md` first — it is the source of t
 | 3a | Eval harness: isolate rerank (live no-rerank baseline) | feature | 0 | yes |
 | 3b | Ingest corpus + measure live rerank lift; record numbers | measurement | 1, 2, 3a | needs live keys |
 | 4 | UI: `light_sensitivity` column + `when` date picker | feature | 0 | yes |
-| B1–B4 | Backlog: VIIRS raster · retrieval polish · faithfulness gate · planets | later | — | mixed |
+| B1–B4 | Backlog: VIIRS raster complete · retrieval polish · faithfulness gate · planets | later | STATE §5.4 | mixed |
 
 ---
 

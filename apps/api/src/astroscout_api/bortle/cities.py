@@ -1,9 +1,10 @@
 """Curated seed of major world metros (name, lat, lon, population).
 
-This is the light-source model the Bortle grid is generated from. It is a
+This is the light-source seed used by the fallback Bortle model. It is a
 deliberately small, reviewable subset of the world's largest light domes — enough
-to estimate sky brightness near populated areas. It is NOT measured data; see
-model.py for the honest framing and the swap path to a real raster.
+to estimate sky brightness near populated areas when rebuilding the fallback grid.
+It is NOT measured data; the committed production grid is derived from World Atlas
+2015, and model.py carries the honest framing.
 """
 
 from __future__ import annotations

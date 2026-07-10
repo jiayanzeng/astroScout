@@ -1,9 +1,9 @@
-"""Precomputed global Bortle grid: build it from the model, then O(1) lookups.
+"""Precomputed global Bortle grid: committed data with O(1) lookups.
 
 The grid is a uint8 array over a regular lat/lon lattice, persisted as a compact
 .npy binary committed alongside the package. Runtime lookup is pure index
-arithmetic — constant time, independent of how the grid was produced. Swap the
-.npy for one derived from real survey data and nothing else changes.
+arithmetic — constant time, independent of how the grid was produced. The current
+.npy is World Atlas 2015-derived; build_grid() remains the city-model fallback.
 """
 
 from __future__ import annotations

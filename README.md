@@ -13,9 +13,9 @@ relay endpoints are supported via `OPENAI_BASE_URL` (v0.6.1).
 ## What's in it
 
 - **Planning engine** (`apps/api`) — astronomical dark window, per-target peak
-  altitude / hours-visible / moon separation, plus an **offline Bortle (light
-  pollution) lookup** (precomputed grid, O(1)) folded into scoring by each object's
-  surface-brightness sensitivity, so rankings flip between dark sites and cities.
+  altitude / hours-visible / moon separation, plus an **offline satellite-derived
+  Bortle (light pollution) lookup** (precomputed grid, O(1)) folded into scoring by
+  each object's surface-brightness sensitivity, so rankings flip between dark sites and cities.
   Endpoints take an optional future `when`; coords are bounds-validated. Pure scorer
   and Bortle model are unit-tested.
 - **Knowledge base / RAG** (`apps/api/rag` + `supabase/`) — ingest ADS literature
@@ -95,7 +95,6 @@ supabase      schema + RLS + pgvector migrations, setup notes
 
 ## Honest scope notes (deliberately not in this slice)
 
-- Higher-fidelity light pollution: swap the modeled grid for a real World Atlas / VIIRS raster.
 - Local cross-encoder reranker (e.g. bge-reranker) as a no-vendor option; per-passage chunk dedup.
 - Per-target rise/set times surfaced in the UI (computed internally already).
 - Background/scheduled ingestion (currently a manual CLI run).

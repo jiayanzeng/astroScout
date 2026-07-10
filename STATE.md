@@ -172,9 +172,12 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    - The Bortle grid is now **satellite-derived** from the World Atlas 2015 (Falchi et
      al. 2016, VIIRS DNB + Cinzano–Falchi radiative-transfer model, SQM-calibrated),
      aggregated to 0.25° by 75th percentile. The city model in `model.py` remains the
-     offline modeled fallback. NYC core reads Bortle **7** under q3 (was 7 under the city
-     model, but now backed by real data instead of a population-based guess). The `.npy`
-     is the deliberate seam — swap it and nothing else changes.
+     offline modeled fallback. NYC core reads Bortle **7** under q3; it also read 7 under
+     the city model and the averaged World Atlas grid. q3 was selected to reduce mean
+     dilution across a roughly 27 km cell while avoiding `max` sensitivity to isolated
+     bright pixels. The NYC cell did not cross the next discrete Bortle boundary; that is
+     an observed result, not a value to tune away. The `.npy` is the deliberate seam —
+     swap it and nothing else changes.
    - The eval harness's offline "dense" retriever and reranker are **deterministic
      stand-ins** for embeddings / a cross-encoder (so it runs with no keys).
    - The bag-of-words reranker **regresses vs hybrid** in the offline eval; this is
@@ -250,15 +253,28 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
   → row=`(90−lat)/res`, col=`(lon+180)/res`, clamped → `int(grid[row,col])`.
 - **Grid is now World Atlas 2015 satellite-derived** (75th-percentile aggregation;
   `scripts/build_bortle_grid_viirs.py`). City cores (NYC, London, Tokyo, Delhi, Cairo)
-  all read **Bortle 7** under q3. Class histogram: 95.8% Bortle 2, 1.7% B3, 2.0% B4,
-  0.4% B5, 0.1% B6, <0.1% B7–9 (1 cell at B9). **0% Bortle 1** — the 171 μcd/m²
-  natural-background floor puts pristine sky at ~21.998 mag/arcsec² → class 2. NYC
-  previously read 7 under the city model; q3 preserves the core without `max`'s
-  sensitivity to outlier pixels, but most cores land at 7, not 8 or 9, because their
-  artificial brightness at 0.25° (~27 km) rarely exceeds the ~1e3 μcd/m² threshold for
-  class 9. (The old city-model grid was 91.5% Bortle 1 with city cores at 7–8 —
-  replaced because modeled population falloff overestimates remote darkness and
-  underserves urban observers.)
+  all read **Bortle 7** under q3. Exact committed-grid class histogram:
+  ```text
+  Bortle 1:       0
+  Bortle 2: 993,599
+  Bortle 3:  17,304
+  Bortle 4:  20,403
+  Bortle 5:   4,019
+  Bortle 6:   1,184
+  Bortle 7:     263
+  Bortle 8:      27
+  Bortle 9:       1
+  ```
+  **0% Bortle 1** — the 171 μcd/m² natural-background floor puts pristine sky at
+  ~21.998 mag/arcsec² → class 2. At the bright end, under the accepted Bortle↔SQM
+  table, class 8 begins above approximately 10,594 μcd/m² artificial brightness and
+  class 9 above approximately 42,684 μcd/m². The named q3 city cells remain class 7,
+  and only one global cell reaches class 9. NYC also read 7 under the city model and
+  under averaged World Atlas aggregation; q3 preserves city cores better than averaging
+  without `max`'s sensitivity to outlier pixels, but the NYC 0.25° cell does not cross
+  the next discrete boundary. (The old city-model grid was 91.5% Bortle 1 with city
+  cores at 7–8 — replaced because modeled population falloff overestimates remote
+  darkness and underserves urban observers.)
 
 ### `datasources/literature.py` (ADS — v0.6.1)
 - `object:` is a **virtual** ADS operator, not a Solr field: sending it straight to
@@ -368,7 +384,10 @@ Rerank lifts. Cohere not tested (no key).
   - Web: deps via corepack `pnpm`; **verify via direct binaries** to dodge the sandbox
     pnpm-run quirk: `apps/web/node_modules/.bin/{tsc --noEmit, eslint ., vitest run,
     next build}`. Run the eval harness offline: `node_modules/.bin/tsx evals/run.ts`.
-  - Regenerate Bortle grid: `apps/api` → `PYTHONPATH=src python scripts/build_bortle_grid.py`.
+  - Regenerate production Bortle grid: `apps/api` → `uv run --with rasterio python
+    scripts/build_bortle_grid_viirs.py --src
+    /Users/yzjia/Documents/World_Atlas_2015/World_Atlas_2015.tif --units mcd`.
+    Offline city-model fallback only: `PYTHONPATH=src python scripts/build_bortle_grid.py`.
 - **Supabase environment gotchas (learned live, 2026-07-02)**:
   - `SUPABASE_URL` must be the **bare project URL** (`https://<ref>.supabase.co`) —
     `rag/store.py` appends `/rest/v1/documents` itself; a URL with `/rest/v1` doubles
@@ -436,8 +455,9 @@ data / retrieval / catalog backlog — items 4, 6, 7, 8:
 4. ✅ **Higher-fidelity light pollution (Done 2026-07-10).** Swapped the modeled grid
    for a World Atlas 2015 raster (75th-percentile aggregation, 0.25°, `bortle_grid.npy`
    regenerated via `scripts/build_bortle_grid_viirs.py`) — **zero code change**.
-   City cores read Bortle 7 (NYC, London, Tokyo, Delhi, Cairo); 95.8% Bortle 2,
-   0% Bortle 1. The `model.py` Walker-law estimator remains the offline fallback.
+   City cores read Bortle 7 (NYC, London, Tokyo, Delhi, Cairo). Exact histogram:
+   B1=0, B2=993,599, B3=17,304, B4=20,403, B5=4,019, B6=1,184, B7=263, B8=27,
+   B9=1. The `model.py` Walker-law estimator remains the offline fallback.
 5. ✅ **Surface `light_sensitivity` in the web UI + date picker (Done 2026-07-10).**
    `light_sensitivity` column added to `/plan` table (badge: robust/moderate/fragile
    with numeric tooltip; thresholds ≤0.3/≤0.6/>0.6). Date picker wired to `when` param

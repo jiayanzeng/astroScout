@@ -65,10 +65,11 @@ side via the `match_documents` RPC, using the same embedding model.
 ## Light pollution (Bortle) — v0.6
 
 The planner folds the observer's sky brightness into ranking. `bortle/` provides an
-**offline, O(1)** Bortle lookup: a curated city/population model (`cities.py`) feeds a
-pure light-pollution model (`model.py`, Walker-law falloff -> calibrated thresholds)
-that is precomputed into a compact `bortle_grid.npy` (0.25 deg, uint8). Runtime lookup
-is pure index arithmetic — no network, no per-request cost.
+**offline, O(1)** Bortle lookup from a compact committed `bortle_grid.npy` (0.25 deg,
+uint8). The production grid is satellite-derived from the World Atlas 2015 (Falchi et
+al. 2016) using 75th-percentile aggregation. Runtime lookup is pure index arithmetic —
+no network, no per-request cost. The curated city/population model (`cities.py`) and
+Walker-law estimator (`model.py`) remain the offline fallback builder only.
 
 Scoring multiplies each target's score by a light-pollution factor scaled by the
 object's surface-brightness sensitivity (`scoring.light_sensitivity_for_kind`): faint

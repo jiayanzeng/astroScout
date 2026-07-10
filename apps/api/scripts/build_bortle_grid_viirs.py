@@ -1,7 +1,8 @@
 """Regenerate the offline Bortle grid from a measured survey raster (World Atlas 2015).
 
-    uv run python scripts/build_bortle_grid_viirs.py \
-        --src /data/world_atlas_2015.tif --units ucd
+    uv run --with rasterio python scripts/build_bortle_grid_viirs.py \
+        --src /Users/yzjia/Documents/World_Atlas_2015/World_Atlas_2015.tif \
+        --units mcd
 
 Reads the World Atlas 2015 artificial zenith sky-brightness GeoTIFF (Falchi et al.
 2016, GFZ Data Services doi:10.5880/GFZ.1.4.2016.001; ~2.9 GB, 30 arcsec, geographic),
@@ -28,8 +29,9 @@ Calibration (do not invent thresholds -- STATE.md Task B1):
 
 UNITS TRAP: the GFZ metadata documents values in mcd/m^2 while the +27.58 zero point
 assumes ucd/m^2 -- a silent 1000x / 7.5-mag error that flattens the whole grid to one
-class. Pass --units explicitly and eyeball the printed per-site sanity report (a real
-Bortle-9 core needs artificial ~ 1e3 ucd/m^2) before trusting the output.
+class. Pass --units explicitly and eyeball the printed per-site sanity report; with the
+default natural background and accepted Bortle table, Bortle 9 starts near
+42,684 ucd/m^2 artificial brightness.
 """
 
 from __future__ import annotations
@@ -129,7 +131,8 @@ def report_sanity(
     """Print artificial value + mag + Bortle at known sites so a units error is obvious."""
     nlat, nlon = grid.shape
     res_lat, res_lon = 180.0 / nlat, 360.0 / nlon
-    print("sanity (a real Bortle-9 core needs artificial ~ 1e3 ucd/m^2):")
+    b9_artificial = 10 ** ((MAG_ZP_UCD - BORTLE_MAG_LOWER_EDGES[-1]) / 2.5) - natural_ucd
+    print(f"sanity (Bortle 9 starts near artificial {b9_artificial:,.0f} ucd/m^2):")
     for name, lat, lon in _SANITY_SITES:
         row = min(nlat - 1, max(0, int((90.0 - lat) / res_lat)))
         col = min(nlon - 1, max(0, int((lon + 180.0) / res_lon)))
