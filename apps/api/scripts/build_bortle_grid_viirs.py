@@ -5,8 +5,9 @@
 
 Reads the World Atlas 2015 artificial zenith sky-brightness GeoTIFF (Falchi et al.
 2016, GFZ Data Services doi:10.5880/GFZ.1.4.2016.001; ~2.9 GB, 30 arcsec, geographic),
-resamples it to the 0.25 deg (720, 1440) lattice used by grid.py in the SAME
-orientation (row 0 = lat +90, col 0 = lon -180), maps sky brightness -> Bortle 1..9
+resamples it (75th-percentile aggregation; see resample_artificial) to the 0.25 deg
+(720, 1440) lattice used by grid.py in the SAME orientation (row 0 = lat +90, col 0 =
+lon -180), maps sky brightness -> Bortle 1..9
 via a published mag/arcsec^2 crosswalk, and np.saves to GRID_PATH. Prints the
 per-class histogram like build_bortle_grid.py so the two scripts read alike.
 
@@ -67,13 +68,17 @@ _SANITY_SITES: tuple[tuple[str, float, float], ...] = (
 
 
 def resample_artificial(src_path: Path, unit_scale: float) -> NDArray[np.float64]:
-    """Average the native artificial-brightness raster onto the 0.25 deg lattice.
+    """Summarize the native artificial-brightness raster onto the 0.25 deg lattice.
 
-    Averaging is done in LINEAR brightness space (correct), then scaled to ucd/m^2.
-    ``Resampling.average`` over the fine source into each coarse cell is a block-mean
-    where the grids align, generalized to handle partial coverage or any global source
-    orientation: reproject reads the source CRS + transform and emits exactly the
-    contract orientation (row 0 = +90 lat, col 0 = -180 lon) defined below.
+    Aggregation is done in LINEAR brightness space (correct), then scaled to ucd/m^2.
+    Each 0.25 deg (~27 km) cell spans ~30x30 native pixels; we take the 75th PERCENTILE
+    (``Resampling.q3``), NOT the mean. Averaging washes out city cores at this cell size
+    -- a dense core diluted by surrounding dark area reads 1-2 Bortle classes low, which
+    under-serves the urban observers the light-pollution ranking exists for. q3 reflects
+    "the sky where the lit part of this cell is," lifting major cores back toward their
+    true 8-9, yet -- unlike ``max`` -- it ignores isolated bright pixels (a stadium or
+    gas flare) so genuinely dark cells stay dark. reproject reads the source CRS +
+    transform and emits exactly the contract orientation (row 0 = +90, col 0 = -180).
     """
     import rasterio
     from rasterio.transform import Affine
@@ -99,7 +104,7 @@ def resample_artificial(src_path: Path, unit_scale: float) -> NDArray[np.float64
             dst_crs="EPSG:4326",
             src_nodata=src.nodata,
             dst_nodata=0.0,  # unmeasured cells (poles/ocean) -> artificial 0 -> pristine
-            resampling=Resampling.average,
+            resampling=Resampling.q3,  # 75th pct: keep city cores, drop outlier pixels
         )
 
     artificial = np.clip(dst.astype(np.float64), 0.0, None)  # negatives are fill noise
