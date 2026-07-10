@@ -20,9 +20,11 @@ Calibration (do not invent thresholds -- STATE.md Task B1):
      (~171 ucd/m^2 ~= 22.0 mag/arcsec^2; Garstang 1989) is added before converting.
   2. mag/arcsec^2 = -2.5 * log10(total_ucd_per_m2) + 27.58
      (12.58 for cd/m^2 per the Garstang/SQM relation + 15 for the ucd->cd 1e6 factor).
-  3. Bortle bins are the standard Bortle(2001) <-> SQM table as cited by the IDA.
-     Reconcile with budget.py::BORTLE_TO_SQM -- the two currently diverge at Bortle
-     8-9. Pick ONE authority so the grid build and the budget estimator can't drift.
+   3. Bortle bins are the standard Bortle(2001) <-> SQM table as cited by the IDA.
+      This is the SINGLE AUTHORITY for the Bortle↔mag/arcsec² mapping. When
+      budget.py is created (Track C Task C1), its BORTLE_TO_SQM midpoints MUST be
+      derived from this same table -- do not independently choose midpoints or the
+      grid build and the budget estimator will drift.
 
 UNITS TRAP: the GFZ metadata documents values in mcd/m^2 while the +27.58 zero point
 assumes ucd/m^2 -- a silent 1000x / 7.5-mag error that flattens the whole grid to one

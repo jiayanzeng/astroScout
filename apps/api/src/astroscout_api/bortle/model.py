@@ -1,9 +1,12 @@
-"""Pure light-pollution model: estimate a Bortle class (1-9) from city lights.
+"""Pure light-pollution model: estimate a Bortle class (1–9) from city lights.
 
-HONEST FRAMING: this is a *modeled estimate* derived from a curated set of major
-cities (cities.py), NOT measured satellite data (e.g. the World Atlas of Artificial
-Night Sky Brightness or VIIRS). It is designed so the precomputed grid file can be
-swapped for a real raster later without changing any calling code (see grid.py).
+HONEST FRAMING: the committed **grid** (`bortle_grid.npy`) is now derived from the
+World Atlas 2015 (Falchi et al. 2016, VIIRS DNB propagated via the Cinzano–Falchi
+radiative-transfer model, SQM-calibrated), aggregated to 0.25° by 75th percentile so
+city cores aren't washed out (see `scripts/build_bortle_grid_viirs.py`). This
+`model.py` estimator itself — a Walker-law city-light falloff computed from a curated
+set of major cities (`cities.py`) — remains the offline modeled fallback. The .npy is
+the deliberate seam; swap it and nothing else changes (see `grid.py`).
 
 The model: each city contributes artificial sky glow that falls off with distance
 following an inverse-power law (Walker's law, exponent ~2.5). Contributions are

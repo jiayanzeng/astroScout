@@ -76,6 +76,8 @@ galaxies are crushed under urban skies while clusters barely move, so **rankings
 between a dark site and a city**. Endpoints accept an optional `when` (ISO date/datetime)
 to plan a future night, and both planning and visibility routers validate lat/lon bounds.
 
-> Honest note: the grid is a *modeled estimate* from city lights, not measured satellite
-> data. The `.npy` is the seam where a real World Atlas / VIIRS raster drops in unchanged.
-> Regenerate with `uv run python scripts/build_bortle_grid.py`.
+> Honest note: the grid is now **satellite-derived** from the World Atlas 2015 (Falchi
+> et al. 2016), aggregated to 0.25° by 75th percentile. The `.npy` is the deliberate
+> seam — swap it and nothing else changes. The city model in `model.py` remains the
+> offline fallback. Regenerate with `uv run --with rasterio python
+> scripts/build_bortle_grid_viirs.py --src <world_atlas.tif> --units mcd`.
