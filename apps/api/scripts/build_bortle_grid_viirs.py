@@ -78,10 +78,16 @@ def resample_artificial(src_path: Path, unit_scale: float) -> NDArray[np.float64
     Each 0.25 deg (~27 km) cell spans ~30x30 native pixels; we take the 75th PERCENTILE
     (``Resampling.q3``), NOT the mean. Averaging washes out city cores at this cell size
     -- a dense core diluted by surrounding dark area reads 1-2 Bortle classes low, which
-    under-serves the urban observers the light-pollution ranking exists for. q3 reflects
-    "the sky where the lit part of this cell is," lifting major cores back toward their
-    true 8-9, yet -- unlike ``max`` -- it ignores isolated bright pixels (a stadium or
-    gas flare) so genuinely dark cells stay dark. reproject reads the source CRS +
+    under-serves the urban observers the light-pollution ranking exists for. Averaging 
+    over a cell this coarse pulls dense cores toward the surrounding dark area; q3 
+    reflects "the sky where the lit part of this cell is" and -- unlike max -- ignores 
+    isolated bright pixels (a stadium or gas flare) so genuinely dark cells stay dark. 
+    reproject reads the source CRS + transform and emits exactly the contract 
+    orientation (row 0 = +90, col 0 = -180). MEASURED: at 0.25 deg even q3 keeps major 
+    cores (NYC/London/Tokyo/Delhi/Cairo) at Bortle 7 -- city-core Bortle is resolution-limited
+    at this cell size, not fixable by aggregation choice. q3's gain over average is the 
+    bright tail (a few Bortle 8-9 cells vs none), not the named cities. See STATE.md for 
+    the committed histogram. reproject reads the source CRS +
     transform and emits exactly the contract orientation (row 0 = +90, col 0 = -180).
     """
     import rasterio
