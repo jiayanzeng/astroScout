@@ -126,7 +126,8 @@ astroscout/
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx               # → redirect /plan
-│       │   ├── plan/ page.tsx + PlanClient.tsx + actions.ts   # ranked table, save/log
+│       │   ├── plan/ page.tsx + PlanClient.tsx + actions.ts   # ranked table, save/log/gear
+│       │   │   └── GearCard.tsx        # signed-in gear CRUD + local selected-profile seam
 │       │   ├── sessions/ page.tsx + [id]/page.tsx             # saved sessions + logs
 │       │   ├── login/page.tsx         # magic-link sign-in
 │       │   ├── auth/callback/route.ts + signout/route.ts
@@ -161,7 +162,8 @@ astroscout/
     └── migrations/
         ├── 0001_init.sql              # sessions + logged_observations (+ RLS, user-scoped)
         ├── 0002_knowledge.sql         # vector ext + documents + match_documents RPC (public-read RLS)
-        └── 0003_hybrid_search.sql     # fts tsvector + GIN + hybrid_search RRF RPC
+        ├── 0003_hybrid_search.sql     # fts tsvector + GIN + hybrid_search RRF RPC
+        └── 0004_gear_profiles.sql     # minimal user-owned f-ratio/filter profiles + RLS
 ```
 
 ### Web dependency versions (resolved, latest-stable)
@@ -215,8 +217,9 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    use `text-embedding-3-small` (1536-d). A mismatch is a silent RAG bug — never diverge.
    Relay corollary (v0.6.1): if `OPENAI_BASE_URL` points at a relay, the relay must serve
    this exact model on **both** sides; point both sides at the same endpoint.
-7. **RLS model.** `sessions` + `logged_observations` are **user-scoped** (`auth.uid()`).
-   `documents` (knowledge base) is **shared**: public-read, writes via service role only.
+7. **RLS model.** `sessions` + `logged_observations` + `gear_profiles` are
+   **user-scoped** (`auth.uid()`). `documents` (knowledge base) is **shared**:
+   public-read, writes via service role only.
 8. **Versions: latest stable, transparently.** Resolved to Next 16 / AI SDK v6 (the plan
    said Next 15). Flagged in `apps/web/README.md` with a pin-to-15 command. ESLint pinned
    to **9** because eslint-config-next 16's flat config breaks on ESLint 10.
@@ -438,6 +441,11 @@ slightly ahead, still consistent with “no discernible difference.”
   mobile-hidden hours column. Pure `formatLocalDateTime` and `bortleLabel` helpers are
   unit-tested. `/chat` adds three starter prompts and smooth auto-scroll while preserving
   W1's defensive tool rendering and error recovery. No dependencies or API payloads changed.
+- Track C3 gear UI (2026-07-11): signed-in `/plan` server-loads the user's gear profiles
+  and renders `GearCard`; anonymous users see no new surface. Authenticated server actions
+  create and delete name/f-ratio/filter rows. `PlanClient` owns the current profile list
+  and selected id, persisting the latter under a client-only `localStorage` key so C4 can
+  consume the selected profile without changing C3 planning requests.
 
 ### Supabase migrations
 - `0001`: `sessions(id,user_id,title,lat,lon,planned_for,created_at)`,
@@ -448,7 +456,12 @@ slightly ahead, still consistent with “no discernible difference.”
   `match_documents(query_embedding,match_count,filter_target)` RPC.
 - `0003`: generated `fts tsvector` + GIN; `hybrid_search(query_text,query_embedding,
   match_count,full_text_weight,semantic_weight,rrf_k,filter_target)` RRF over full-text +
-  vector, returns `...,similarity`. (Run order: 0001 → 0002 → 0003.)
+  vector, returns `...,similarity`.
+- `0004`: `gear_profiles(id,user_id,name,f_ratio,filter_kind,created_at)` with f-ratio
+  `(0,32]`, three budget filter kinds, user/time index, and own-row select/insert/update/
+  delete RLS. It deliberately has no SQM column: sky brightness belongs to the site.
+  Run order: 0001 → 0002 → 0003 → 0004. The migration file is present in the repo but
+  must be applied by the maintainer in Supabase.
 
 ### Eval harness numbers (offline, deterministic stand-ins)
 ```
@@ -562,8 +575,8 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 ## 5. Immediate next steps & unresolved items
 
 **CI is green.** Items 0–8, Track W2 item 10, Track C1a item 11, Track C1 item 12, and
-Track C2 item 13 are done. Track W1 item 9 is implemented and offline-green; its live
-acceptance step remains open:
+Track C2 item 13 and Track C3 item 14 are done. Track W1 item 9 is implemented and
+offline-green; its live acceptance step remains open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -721,6 +734,20 @@ acceptance step remains open:
     edge cases and all five required 422 cases run offline. API Ruff/format/mypy are clean
     with **69 passed / 13 deselected**; both new local-Astropy integration cases pass
     explicitly (**2 passed**). No dependencies or committed data changed.
+
+14. ✅ **Track C3 — `gear_profiles` migration + minimal web gear UI (Done
+    2026-07-11).** Added the three-field user-owned gear schema with the exact f-ratio and
+    filter constraints, index, and four `0001`-pattern RLS policies; SQL was not applied
+    from the agent environment. Supabase setup now records the 0001→0004 order and the
+    deliberate absence of gear SQM. Signed-in `/plan` server-loads profiles and exposes
+    create/select/delete through `GearCard`; actions derive the user id from auth, and
+    deletion adds an explicit user filter atop RLS. `PlanClient` owns the selected profile
+    seam and persists its id client-side; planning fetches are unchanged. Anonymous local
+    browser QA confirmed no new card and no app console errors; the available browser had
+    no authenticated session, so no live Supabase mutation was attempted. Full web gate:
+    typecheck/ESLint clean, **44 passed + 6 skipped**, and a successful **12-route** build.
+    API regression gate remains green at **69 passed / 13 deselected**. No dependencies
+    changed.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`

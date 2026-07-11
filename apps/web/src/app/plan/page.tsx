@@ -2,12 +2,21 @@ import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { PlanClient } from "@/app/plan/PlanClient";
+import type { GearProfile } from "@/lib/supabase/types";
 
 export default async function PlanPage() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  let gearProfiles: GearProfile[] = [];
+  if (user) {
+    const { data } = await supabase
+      .from("gear_profiles")
+      .select("id,user_id,name,f_ratio,filter_kind,created_at")
+      .order("created_at", { ascending: false });
+    gearProfiles = (data ?? []) as GearProfile[];
+  }
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-12">
@@ -25,7 +34,7 @@ export default async function PlanPage() {
         </p>
       )}
 
-      <PlanClient signedIn={!!user} />
+      <PlanClient signedIn={!!user} initialGearProfiles={gearProfiles} />
     </main>
   );
 }

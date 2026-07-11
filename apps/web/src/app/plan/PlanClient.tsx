@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { logObservation, saveSession } from "@/app/plan/actions";
+import { GearCard } from "@/app/plan/GearCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,9 @@ import {
   lightSensitivityTier,
   type LightSensitivityTier,
 } from "@/lib/format";
+import type { GearProfile } from "@/lib/supabase/types";
+
+const SELECTED_GEAR_STORAGE_KEY = "astroscout:selected-gear-profile";
 
 const LP_TIER_VARIANT: Record<LightSensitivityTier, "good" | "marginal" | "poor"> = {
   robust: "good",
@@ -60,17 +64,46 @@ function LoadingRows() {
   ));
 }
 
-export function PlanClient({ signedIn }: { signedIn: boolean }) {
+export function PlanClient({
+  signedIn,
+  initialGearProfiles,
+}: {
+  signedIn: boolean;
+  initialGearProfiles: GearProfile[];
+}) {
   const [lat, setLat] = useState("-36.85");
   const [lon, setLon] = useState("174.76");
   const [when, setWhen] = useState("");
   const [plan, setPlan] = useState<NightPlan | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [gearProfiles, setGearProfiles] = useState(initialGearProfiles);
+  const [selectedGearProfileId, setSelectedGearProfileId] = useState<string | null>(null);
+  const [gearSelectionLoaded, setGearSelectionLoaded] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const restore = window.setTimeout(() => {
+      const savedId = window.localStorage.getItem(SELECTED_GEAR_STORAGE_KEY);
+      if (savedId && initialGearProfiles.some((profile) => profile.id === savedId)) {
+        setSelectedGearProfileId(savedId);
+      }
+      setGearSelectionLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(restore);
+  }, [initialGearProfiles]);
+
+  useEffect(() => {
+    if (!gearSelectionLoaded) return;
+    if (selectedGearProfileId) {
+      window.localStorage.setItem(SELECTED_GEAR_STORAGE_KEY, selectedGearProfileId);
+    } else {
+      window.localStorage.removeItem(SELECTED_GEAR_STORAGE_KEY);
+    }
+  }, [gearSelectionLoaded, selectedGearProfileId]);
 
   async function runPlan(whenOverride?: string) {
     const w = whenOverride ?? when;
@@ -143,6 +176,15 @@ export function PlanClient({ signedIn }: { signedIn: boolean }) {
 
   return (
     <div className="flex flex-col gap-6">
+      {signedIn && (
+        <GearCard
+          profiles={gearProfiles}
+          selectedProfileId={selectedGearProfileId}
+          onProfilesChange={setGearProfiles}
+          onSelect={setSelectedGearProfileId}
+        />
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Plan tonight</CardTitle>
