@@ -81,10 +81,12 @@ astroscout/
 │       ├── params.py                  # shared Annotated query types: Lat, Lon, When
 │       ├── scoring.py                 # PURE scorer + light-pollution linkage  ★core
 │       ├── bortle/                    # OFFLINE light-pollution lookup  ★core (v0.6)
+│       │   ├── calibration.py         #   PURE Bortle↔SQM single authority + midpoints
 │       │   ├── cities.py              #   82 City(name,lat,lon,population) seed
 │       │   ├── model.py               #   PURE: light_index_at, index_to_bortle, haversine_km (fallback)
-│       │   ├── grid.py                #   build_grid / load_grid (mmap) / bortle_at  O(1)
-│       │   └── bortle_grid.npy        #   COMMITTED uint8 grid (720×1440, 0.25°, ~1MB) — World Atlas 2015 q3
+│       │   ├── grid.py                #   Bortle + optional continuous-SQM mmap lookups O(1)
+│       │   ├── bortle_grid.npy        #   COMMITTED uint8 grid (720×1440, 0.25°, ~1MB) — World Atlas 2015 q3
+│       │   └── sqm_grid.npy           #   COMMITTED float16 SQM sidecar (720×1440, ~2MB), same run
 │       ├── datasources/
 │       │   ├── dso_catalog.py         # 15 fixed DSOs + Jupiter/Saturn/Mars/Venus (moving bodies)
 │       │   ├── planning.py            # dark window + fixed/moving-body visibility/ranking ★core
@@ -105,7 +107,7 @@ astroscout/
 │           └── planning.py            # GET /plan/night, /plan/target  (Lat/Lon/When)
 │   └── tests/                         # see §4 for what's CI vs integration
 │       ├── test_scoring.py            # scoring + light-pollution (incl. planet neutrality)  [14]
-│       ├── test_bortle.py             # model, grid index math, bortle_at sanity  [6]
+│       ├── test_bortle.py             # model, Bortle/SQM grid math + calibration  [11]
 │       ├── test_parse_when.py         # date/datetime parsing  [4]
 │       ├── test_routers.py            # 422 validation (CI, 5) + future-date (integration, 2)
 │       ├── test_chunking.py           # RAG chunker  [6]
@@ -248,13 +250,23 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
   only). `rank(dict)->sorted list[(name,score)]`.
 
 ### `bortle/` (offline, O(1))
+- `calibration.py` is the **single Bortle↔SQM authority**. It owns
+  `BORTLE_MAG_LOWER_EDGES=(22.00,21.75,21.50,20.50,19.50,18.50,17.50,16.00)`, pure
+  `bortle_for_sqm`, and programmatically derived representative values
+  `BORTLE_TO_SQM={1:22.0,2:21.88,3:21.63,4:21.0,5:20.0,6:19.0,7:18.0,8:16.75,9:15.5}`.
+  Class 9 is open-ended; 15.5 is the labelled approximation 0.5 mag below its edge.
 - `model.py`: `FALLOFF_EXPONENT=2.5`, `DISTANCE_OFFSET_KM=8.0`,
   `BORTLE_LOG_THRESHOLDS=(0.6,1.1,1.6,2.1,2.7,3.3,4.0,4.7)`.
   `light_index_at(lat,lon,cities)=Σ pop/(d_km+8)^2.5`; `index_to_bortle(i)=
   clamp(1+Σ[log10(i+1)≥t], 1, 9)`; `bortle_for_point(lat,lon)`.
 - `grid.py`: `GRID_RESOLUTION_DEG=0.25`; `build_grid()`→`uint8 (720,1440)` (vectorized);
   `load_grid()` = `np.load(GRID_PATH, mmap_mode="r")` (`lru_cache`); **`bortle_at(lat,lon)`**
-  → row=`(90−lat)/res`, col=`(lon+180)/res`, clamped → `int(grid[row,col])`.
+  uses shared clamped row/column math. `load_sqm_grid()` memory-maps and caches the
+  optional float16 `sqm_grid.npy`; **`sqm_at(lat,lon)`** uses the identical index math and
+  returns `None` if the sidecar is absent. The World Atlas build script imports the
+  calibration edges and emits clipped `[10,25]` float16 SQM beside Bortle. The committed
+  sidecar is `(720,1440) float16`, observed range `15.0546875..22.0`, SHA-256
+  `755e61e4dc7c97721a962b9da8977f5f55cc8fef8730701ccde64477cd7f0f2d`.
 - **Grid is now World Atlas 2015 satellite-derived** (75th-percentile aggregation;
   `scripts/build_bortle_grid_viirs.py`). City cores (NYC, London, Tokyo, Delhi, Cairo)
   all read **Bortle 7** under q3. Exact committed-grid class histogram:
@@ -436,7 +448,7 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-11: **43 unit tests pass**, 11 deselected as
+- **Current status:** API verified 2026-07-11: **48 unit tests pass**, 11 deselected as
   integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The added
   pure test proves planet sensitivity is `0.0` and Bortle 9 is neutral; the Jupiter
   built-in-ephemeris check is integration-gated. Current web source passes typecheck, lint, the unchanged offline retrieval
@@ -493,9 +505,8 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–8 and Track W2 item 10 are done. Track W1 item 9 is implemented
-and offline-green; its real-relay multi-tool acceptance check remains open because the
-sandbox has no live OpenAI/relay access:
+**CI is green.** Items 0–8, Track W2 item 10, and Track C1a item 11 are done. Track W1
+item 9 is implemented and offline-green; its live acceptance step remains open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -598,6 +609,27 @@ sandbox has no live OpenAI/relay access:
     no token adjustment was necessary. Full web gate: typecheck and ESLint clean, Vitest
     **44 passed + 6 skipped**, and the production build emits **12 dynamic routes**. No
     dependencies or backend behavior changed.
+11. ✅ **Track C1a — calibration authority + continuous-SQM sidecar (Done
+    2026-07-11).** Added pure, numpy-free
+    `bortle/calibration.py` as the only crosswalk authority, with drift-proof
+    representative midpoints and class round-trip coverage. The World Atlas script now
+    imports that table, retains the same vectorized Bortle classification, and is ready to
+    save a clipped float16 `(720,1440)` `sqm_grid.npy` while reporting SQM per sanity site
+    and both artifacts. Runtime adds cached optional `load_sqm_grid` / `sqm_at` with the
+    same factored coordinate math as `bortle_at`; absence returns `None`. Four new CI tests
+    cover the crosswalk, missing fallback, float16 lookup, synthetic Bortle/SQM agreement,
+    and the production sidecar artifact. Synthetic build conversion matched the previous
+    formula exactly. The maintainer regenerated both production artifacts; the Bortle
+    output is byte-identical, with SHA-256
+    `2e9b98d1537665de6773e273bfaac053cbc1c47e6d4f043ff5ca66bf59c91b91`, shape/dtype
+    `(720,1440) uint8`, and histogram remains B2=993,599, B3=17,304, B4=20,403,
+    B5=4,019, B6=1,184, B7=263, B8=27, B9=1 (B1=0). The committed `sqm_grid.npy` is
+    `(720,1440) float16`, SHA-256
+    `755e61e4dc7c97721a962b9da8977f5f55cc8fef8730701ccde64477cd7f0f2d`; observed
+    NYC/London/Tokyo/Delhi/Cairo SQM values are respectively
+    `17.703125/17.953125/18.0625/17.90625/17.90625`, with all five Bortle readings still
+    7. Full gates are green: API Ruff/mypy plus **48 passed / 11 deselected**; web
+    typecheck/ESLint, **44 passed + 6 skipped**, and the 12-route production build.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`

@@ -26,13 +26,16 @@ file covers only API-local specifics.
   **World Atlas 2015-derived** via `scripts/build_bortle_grid_viirs.py` (75th-percentile
   `Resampling.q3`). `scripts/build_bortle_grid.py` regenerates the **city-model fallback**
   only — not the production grid.
+- **`sqm_grid.npy`** (float16, 720×1440, 0.25°) is the committed continuous-SQM sidecar
+  generated in the same World Atlas run. `sqm_at` uses it when present and returns `None`
+  when absent so source checkouts remain backward-compatible before regeneration.
 - **`model.py`** is the offline modeled fallback (Walker-law falloff), not the production
   grid. Keep its `HONEST FRAMING` docstring consistent with STATE.md §3.
 - Regenerate the production grid (build-only rasterio) only when a task asks:
   `uv run --with rasterio python scripts/build_bortle_grid_viirs.py --src <geotiff> --units mcd`
   then report SHA-256 + city readings + histogram.
-- Calibration authority: `BORTLE_MAG_LOWER_EDGES` in `build_bortle_grid_viirs.py`. A future
-  `budget.py` (Track C) must derive its `BORTLE_TO_SQM` from it, not choose its own midpoints.
+- Calibration authority: `bortle/calibration.py` owns `BORTLE_MAG_LOWER_EDGES` and derives
+  `BORTLE_TO_SQM`. The grid build and future `budget.py` must import it, not restate values.
 
 ## Known limitation — don't re-litigate
 

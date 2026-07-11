@@ -23,6 +23,7 @@ from .model import (
 
 GRID_RESOLUTION_DEG = 0.25
 GRID_PATH = Path(__file__).resolve().parent / "bortle_grid.npy"
+SQM_GRID_PATH = Path(__file__).resolve().parent / "sqm_grid.npy"
 
 _EARTH_RADIUS_KM = 6371.0
 _THRESHOLDS = np.array(BORTLE_LOG_THRESHOLDS, dtype=np.float64)
@@ -68,14 +69,39 @@ def load_grid() -> NDArray[np.uint8]:
     return grid
 
 
-def bortle_at(lat: float, lon: float) -> int:
-    """O(1) Bortle lookup for an observer location."""
-    grid = load_grid()
-    nlat, nlon = grid.shape
+@lru_cache(maxsize=1)
+def load_sqm_grid() -> NDArray[np.float16] | None:
+    """Load the optional continuous-SQM sidecar (memory-mapped, cached)."""
+    if not SQM_GRID_PATH.exists():
+        return None
+    grid: NDArray[np.float16] = np.load(SQM_GRID_PATH, mmap_mode="r")
+    return grid
+
+
+def _grid_indices(nlat: int, nlon: int, lat: float, lon: float) -> tuple[int, int]:
+    """Return clamped row/column indices for a regular global lattice."""
     res_lat = 180.0 / nlat
     res_lon = 360.0 / nlon
     row = int((90.0 - lat) / res_lat)
     col = int((lon + 180.0) / res_lon)
     row = max(0, min(nlat - 1, row))
     col = max(0, min(nlon - 1, col))
+    return row, col
+
+
+def bortle_at(lat: float, lon: float) -> int:
+    """O(1) Bortle lookup for an observer location."""
+    grid = load_grid()
+    nlat, nlon = grid.shape
+    row, col = _grid_indices(nlat, nlon, lat, lon)
     return int(grid[row, col])
+
+
+def sqm_at(lat: float, lon: float) -> float | None:
+    """Return continuous sky brightness, or None when the sidecar is unavailable."""
+    grid = load_sqm_grid()
+    if grid is None:
+        return None
+    nlat, nlon = grid.shape
+    row, col = _grid_indices(nlat, nlon, lat, lon)
+    return float(grid[row, col])

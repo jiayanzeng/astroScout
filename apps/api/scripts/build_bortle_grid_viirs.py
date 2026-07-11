@@ -22,10 +22,9 @@ Calibration (do not invent thresholds -- STATE.md Task B1):
   2. mag/arcsec^2 = -2.5 * log10(total_ucd_per_m2) + 27.58
      (12.58 for cd/m^2 per the Garstang/SQM relation + 15 for the ucd->cd 1e6 factor).
    3. Bortle bins are the standard Bortle(2001) <-> SQM table as cited by the IDA.
-      This is the SINGLE AUTHORITY for the Bortle↔mag/arcsec² mapping. When
-      budget.py is created (Track C Task C1), its BORTLE_TO_SQM midpoints MUST be
-      derived from this same table -- do not independently choose midpoints or the
-      grid build and the budget estimator will drift.
+      The SINGLE AUTHORITY for the Bortle↔mag/arcsec² mapping now lives in
+      astroscout_api.bortle.calibration. This script and Track C budget code import
+      that table so the grid build and estimator cannot drift.
 
 UNITS TRAP: the GFZ metadata documents values in mcd/m^2 while the +27.58 zero point
 assumes ucd/m^2 -- a silent 1000x / 7.5-mag error that flattens the whole grid to one
@@ -42,26 +41,13 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from astroscout_api.bortle.grid import GRID_PATH, GRID_RESOLUTION_DEG
+from astroscout_api.bortle.calibration import BORTLE_MAG_LOWER_EDGES
+from astroscout_api.bortle.grid import GRID_PATH, GRID_RESOLUTION_DEG, SQM_GRID_PATH
 
 # --- calibration constants (single source of truth for the conversion) ---------
 NATURAL_UCD_DEFAULT = 171.0  # natural zenith background, ucd/m^2 (~22.0 mag/arcsec^2)
 MAG_ZP_UCD = 27.58  # mag/arcsec^2 = -2.5 * log10(brightness in ucd/m^2) + MAG_ZP_UCD
 UCD_PER_UNIT: dict[str, float] = {"ucd": 1.0, "mcd": 1000.0}  # source unit -> ucd/m^2
-
-# Inclusive lower mag/arcsec^2 edge of Bortle classes 1..8; anything below the last
-# edge is class 9. Bortle(2001) <-> SQM table as cited by the IDA. DO NOT retune to
-# make a test pass -- if a directional assertion fails on real data, report it.
-BORTLE_MAG_LOWER_EDGES: tuple[float, ...] = (
-    22.00,  # mag >= 22.00      -> Bortle 1
-    21.75,  # 21.75 <= mag <22  -> 2
-    21.50,  # 21.50 .. 21.75    -> 3
-    20.50,  # 20.50 .. 21.50    -> 4
-    19.50,  # 19.50 .. 20.50    -> 5
-    18.50,  # 18.50 .. 19.50    -> 6
-    17.50,  # 17.50 .. 18.50    -> 7
-    16.00,  # 16.00 .. 17.50    -> 8  (mag < 16.00 -> 9)
-)
 
 # Directional spot-checks mirroring tests/test_bortle.py (name, lat, lon).
 _SANITY_SITES: tuple[tuple[str, float, float], ...] = (
@@ -121,20 +107,33 @@ def resample_artificial(src_path: Path, unit_scale: float) -> NDArray[np.float64
     return artificial * unit_scale
 
 
-def to_bortle(artificial_ucd: NDArray[np.float64], natural_ucd: float) -> NDArray[np.uint8]:
-    """Map artificial brightness (ucd/m^2) + natural background to Bortle 1..9."""
+def to_sqm(artificial_ucd: NDArray[np.float64], natural_ucd: float) -> NDArray[np.float64]:
+    """Convert artificial brightness plus natural background to total-sky SQM."""
     total = artificial_ucd + natural_ucd  # >= natural_ucd > 0, so log10 is safe
-    mag = -2.5 * np.log10(total) + MAG_ZP_UCD
+    sqm: NDArray[np.float64] = -2.5 * np.log10(total) + MAG_ZP_UCD
+    return sqm
+
+
+def _bortle_from_sqm(mag: NDArray[np.float64]) -> NDArray[np.uint8]:
+    """Apply the authoritative Bortle edges to a continuous SQM lattice."""
     edges = np.array(BORTLE_MAG_LOWER_EDGES, dtype=np.float64)
     # Bortle = 1 + (count of lower edges the pixel is too bright to reach).
     bortle = 1 + (mag[..., None] < edges).sum(axis=-1)
     return np.clip(bortle, 1, 9).astype(np.uint8)
 
 
+def to_bortle(artificial_ucd: NDArray[np.float64], natural_ucd: float) -> NDArray[np.uint8]:
+    """Map artificial brightness (ucd/m^2) + natural background to Bortle 1..9."""
+    return _bortle_from_sqm(to_sqm(artificial_ucd, natural_ucd))
+
+
 def report_sanity(
-    grid: NDArray[np.uint8], artificial_ucd: NDArray[np.float64], natural_ucd: float
+    grid: NDArray[np.uint8],
+    sqm_grid: NDArray[np.float16],
+    artificial_ucd: NDArray[np.float64],
+    natural_ucd: float,
 ) -> None:
-    """Print artificial value + mag + Bortle at known sites so a units error is obvious."""
+    """Print artificial value + sidecar SQM + Bortle so a units error is obvious."""
     nlat, nlon = grid.shape
     res_lat, res_lon = 180.0 / nlat, 360.0 / nlon
     b9_artificial = 10 ** ((MAG_ZP_UCD - BORTLE_MAG_LOWER_EDGES[-1]) / 2.5) - natural_ucd
@@ -143,9 +142,9 @@ def report_sanity(
         row = min(nlat - 1, max(0, int((90.0 - lat) / res_lat)))
         col = min(nlon - 1, max(0, int((lon + 180.0) / res_lon)))
         art = float(artificial_ucd[row, col])
-        mag = -2.5 * float(np.log10(art + natural_ucd)) + MAG_ZP_UCD
+        sqm = float(sqm_grid[row, col])
         b = int(grid[row, col])
-        print(f"  {name:12s} artificial={art:9.1f} ucd/m^2  mag={mag:5.2f}  Bortle {b}")
+        print(f"  {name:12s} artificial={art:9.1f} ucd/m^2  SQM={sqm:5.2f}  Bortle {b}")
 
 
 def main() -> int:
@@ -169,15 +168,22 @@ def main() -> int:
         raise SystemExit(f"source raster not found: {args.src}")
 
     artificial = resample_artificial(args.src, UCD_PER_UNIT[args.units])
-    grid = to_bortle(artificial, args.natural)
+    sqm = to_sqm(artificial, args.natural)
+    grid = _bortle_from_sqm(sqm)
+    sqm_grid = np.clip(sqm, 10.0, 25.0).astype(np.float16)
 
-    report_sanity(grid, artificial, args.natural)
+    report_sanity(grid, sqm_grid, artificial, args.natural)
 
     np.save(GRID_PATH, grid)
-    print(f"wrote {GRID_PATH} ({GRID_PATH.stat().st_size / 1024:.0f} KB), shape {grid.shape}")
+    np.save(SQM_GRID_PATH, sqm_grid)
     vals, counts = np.unique(grid, return_counts=True)
     for v, c in zip(vals, counts, strict=True):
         print(f"  Bortle {int(v)}: {100 * c / grid.size:5.1f}% of cells")
+    print(f"wrote {GRID_PATH} ({GRID_PATH.stat().st_size / 1024:.0f} KB), shape {grid.shape}")
+    print(
+        f"wrote {SQM_GRID_PATH} ({SQM_GRID_PATH.stat().st_size / 1024:.0f} KB), "
+        f"shape {sqm_grid.shape}"
+    )
     return 0
 
 

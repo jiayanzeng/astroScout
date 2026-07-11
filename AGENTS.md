@@ -66,8 +66,8 @@ Bortle), and the **full class histogram**. That is what makes the result reviewa
 ## Boundaries
 
 - Never commit `.env` / `.env.local`; relay/base-URL switching is env, not code (§2.11).
-- The Bortle↔mag/arcsec² table in `scripts/build_bortle_grid_viirs.py`
-  (`BORTLE_MAG_LOWER_EDGES`) is the **single calibration authority**. Anything needing a
-  Bortle↔SQM mapping (e.g. Track C `budget.py`) must derive from it, not re-invent it.
+- `bortle/calibration.py` (`BORTLE_MAG_LOWER_EDGES` and derived `BORTLE_TO_SQM`) is the
+  **single calibration authority**. The grid build and anything needing a Bortle↔SQM
+  mapping (e.g. Track C `budget.py`) must import from it, not re-invent the table.
 - Plan/handoff documents live in `docs/plans/` (or are gitignored) — don't leave them
   untracked at repo root.
