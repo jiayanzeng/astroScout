@@ -110,6 +110,25 @@ raise recall@3 above raw hybrid, but its MRR and nDCG@5 fall below even the raw 
 Per the eval-driven adoption rule, BGE stays explicitly opt-in and the production
 Cohere -> LLM -> pass-through default remains unchanged.
 
+## Task B3 live faithfulness gate (2026-07-11)
+
+`faithfulness-cases.ts` contains six canned copilot-style cases: three fully grounded
+answers and three answers with one deliberately unsupported number, age, or superlative.
+`faithfulness.live.test.ts` runs them through `OpenAIJudge` only when
+`OPENAI_API_KEY` is present. Grounded cases must score at least 0.8; planted cases must
+score below 0.8.
+
+No-key CI behavior is deterministic: the existing 40 tests pass and the six live cases
+are skipped. Run the live gate with the ignored local env file:
+
+```bash
+node --env-file=.env.local node_modules/vitest/vitest.mjs run \
+  evals/faithfulness.live.test.ts
+```
+
+Measured live result: **6/6 cases passed** through the configured `gpt-4o-mini` judge.
+The fixture is canned and sends no retrieved corpus or user data.
+
 ## Extending
 
 - Add cases to `RETRIEVAL_DATASET` in `dataset.ts`.

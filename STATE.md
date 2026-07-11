@@ -141,6 +141,7 @@ astroscout/
 │       ├── metrics.ts (+test)         # hit@k, precision@k, recall@k, MRR, nDCG, uniqueInOrder
 │       ├── fusion.ts (+test)          # reciprocalRankFusion (RRF)
 │       ├── faithfulness.ts (+test)    # claim split + score; MockJudge; judge-openai.ts (OpenAIJudge)
+│       ├── faithfulness-cases.ts + faithfulness.live.test.ts  # 6 live-gated canned cases
 │       ├── text.ts                    # tokens/stem/tf/cosineSparse
 │       ├── retriever.ts               # Lexical / Dense / Hybrid / Live retrievers
 │       │                              #   variants: raw hybrid, explicit LLM, explicit BGE
@@ -384,6 +385,19 @@ about 5.5 percentage points, MRR by about 0.20, and nDCG@5 by about 0.19. It imp
 hybrid recall@3 but falls below raw hybrid on MRR and nDCG@5. Per rule 3, BGE remains an
 explicit opt-in and the production Cohere → LLM → pass-through default is unchanged.
 
+### Faithfulness eval
+- `splitClaims(answer)` splits sentence-level claims; `faithfulnessScore` returns the
+  supported-claim fraction (empty claim list = 1). `MockJudge` is the deterministic
+  offline stand-in and remains covered by seven unit tests.
+- `OpenAIJudge` uses `gpt-4o-mini` via the default `@ai-sdk/openai` provider, so it honors
+  `OPENAI_BASE_URL`. It marks a claim supported only when the supplied contexts directly
+  substantiate it and falls back to unsupported if the model drops a claim.
+- `FAITHFULNESS_CASES` has six canned copilot-style answers: three fully grounded and
+  three with one planted unsupported number, age, or superlative. The live test is gated
+  by `describe.skipIf(!process.env.OPENAI_API_KEY)`; grounded scores must be ≥0.8 and
+  planted cases <0.8. Verified live 2026-07-11: **6/6 passed**. With no key, the same six
+  cases are skipped and the existing 40 offline tests still pass.
+
 ---
 
 ## 4. Verification, CI & environment quirks
@@ -397,9 +411,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
   tests pass** (34 @ v0.6 + 6 ADS-resolver + 2 config-anchoring from Task 1), 10
   deselected as integration; `ruff check`, `ruff format --check`, and `mypy src` all
   clean — the 2026-07-02 relay-patch lint regression in `rag/embeddings.py` is fixed
-  (§5 item 0). Current Task B2 web source passes **40 tests** (prior 32 + 6 passage
-  dedup + 2 local-BGE unit tests), typecheck, lint, the unchanged offline eval table,
-  and the 12-route production build. The live A/B is recorded above (§5 item 6).
+  (§5 item 0). Current web source passes typecheck, lint, the unchanged offline retrieval
+  table, and the 12-route production build. No-key Vitest: **40 passed + 6 live
+  faithfulness cases skipped**. Live B3 gate: **6/6 passed** through `OpenAIJudge`.
+  The B2 live A/B is recorded above (§5 item 6).
 - **How to verify locally**:
   - API: from `apps/api`, `PYTHONPATH=src python -m pytest -m "not integration"`, plus
     `ruff check .`, `ruff format --check .`, `mypy src`.
@@ -450,7 +465,7 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–6 are done; items 7 and 8 remain open:
+**CI is green.** Items 0–7 are done; item 8 remains open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -503,9 +518,15 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
    production still defaults to Cohere → LLM → pass-through. Full web gate is green:
    typecheck, lint, 40 tests, unchanged offline eval, and 12-route build. See §3 and
    `evals/README.md`.
-7. **Copilot faithfulness in CI-adjacent form.** `OpenAIJudge` exists; wire a small
-   live-gated faithfulness pass over a few canned copilot answers to catch ungrounded
-   claims (offline uses `MockJudge`).
+7. ✅ **Copilot faithfulness live gate (Done 2026-07-11).** Added six canned cases:
+   three fully grounded answers and three with a planted unsupported number, age, or
+   superlative. `faithfulness.live.test.ts` reuses `OpenAIJudge`, `splitClaims`, and
+   `faithfulnessScore`; `describe.skipIf(!OPENAI_API_KEY)` keeps the no-key path
+   network-free. Grounded cases require ≥0.8 and planted cases <0.8. Measured no-key
+   result: 40 existing tests pass, 6 live cases skip (the task prompt's old 32-test count
+   predated B2). Measured live result through the configured relay: **6/6 pass**. The
+   fixture is canned and sends no retrieved corpus or user data. Typecheck, lint, and the
+   12-route production build remain green; `MockJudge` stays the offline path.
 8. **Planets / non-DSO targets.** Catalog is DSO-only; planets (high surface brightness,
    ~0 light sensitivity) aren't modelled. If added, give them `light_sensitivity ≈ 0`.
 
