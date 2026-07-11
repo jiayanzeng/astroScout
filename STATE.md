@@ -42,10 +42,11 @@ see §5.
 
 ### Data flow
 ```
-location (+when) ─► FastAPI /plan/night ─► dark_window + per-target astropy compute
+location (+when, optional gear/SQM) ─► FastAPI /plan/night ─► dark_window + per-target astropy compute
                                           + bortle_at(lat,lon)  ─► scoring.score_target
-                                          ─► ranked targets (LP-aware) + bortle
+                                          ─► ranked targets + optional pure budget ranges
 web /plan ─► /api/plan (proxy) ─► table (save session / log observation → Supabase RLS)
+selected target + gear ─► /api/project ─► /plan/project ─► 30-night completion detail
 copilot /chat ─► /api/chat (AI SDK streamText, 3 tools) ─► planNight / getTargetDetail
                                           / searchKnowledge(embed→hybrid_search→rerank)
 ingestion: ADS object resolver ─► abstracts ─► chunk ─► embed (base-URL aware)
@@ -111,7 +112,7 @@ astroscout/
 │       ├── test_scoring.py            # scoring + light-pollution (incl. planet neutrality)  [14]
 │       ├── test_bortle.py             # model, Bortle/SQM grid math + calibration  [11]
 │       ├── test_parse_when.py         # date/datetime parsing  [4]
-│       ├── test_routers.py            # 422 validation (CI, 10) + future-date (integration, 2)
+│       ├── test_routers.py            # 422 validation (CI, 13) + future-date (integration, 2)
 │       ├── test_chunking.py           # RAG chunker  [6]
 │       ├── test_literature.py         # ADS resolver translation + fallbacks (CI, 6)
 │       │                              #   + live round-trips (integration, 3)  ★(v0.6.1)
@@ -126,13 +127,14 @@ astroscout/
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx               # → redirect /plan
-│       │   ├── plan/ page.tsx + PlanClient.tsx + actions.ts   # ranked table, save/log/gear
-│       │   │   └── GearCard.tsx        # signed-in gear CRUD + local selected-profile seam
+│       │   ├── plan/ page.tsx + PlanClient.tsx + actions.ts   # ranked table, budgets, save/log/gear
+│       │   │   ├── GearCard.tsx        # signed-in gear CRUD + local selected-profile seam
+│       │   │   └── ProjectDetailCard.tsx # on-demand completion range + usable-hours strip
 │       │   ├── sessions/ page.tsx + [id]/page.tsx             # saved sessions + logs
 │       │   ├── login/page.tsx         # magic-link sign-in
 │       │   ├── auth/callback/route.ts + signout/route.ts
 │       │   ├── chat/page.tsx          # copilot: renders typed tool-call cards + sources
-│       │   ├── api/{chat,plan,visibility}/route.ts            # AI SDK route + proxies
+│       │   ├── api/{chat,plan,project,visibility}/route.ts    # AI SDK route + proxies
 │       │   ├── layout.tsx, globals.css (Tailwind v4 + shadcn tokens)
 │       ├── components/ui/             # button, input, card, badge (shadcn new-york)
 │       └── lib/
@@ -379,9 +381,14 @@ slightly ahead, still consistent with “no discernible difference.”
   J2000 coordinates; moving bodies use `get_body` across the time grid and again at
   peak for moon separation. Astropy's built-in ephemeris is planning-grade, not
   precision astrometry, and needs no network. Sets `bortle` and kind sensitivity.
-- `rank_targets(lat,lon,when=None)` ranks all 19 local targets → `{dusk_utc, dawn_utc, dark_hours,
+- `rank_targets(lat,lon,when=None, f_ratio=None, filter_kind="broadband", tier="clean",
+  sqm=None)` ranks all 19 local targets → `{dusk_utc, dawn_utc, dark_hours,
   moon_illumination, bortle, targets:[{name, common_name, kind, score, rating,
   peak_altitude_deg, hours_visible, moon_separation_deg, light_sensitivity}]}` sorted by score.
+  With no f-ratio its payload remains unchanged. With gear, sky is resolved once using
+  user SQM → sidecar → class precedence, top-level `sky_sqm/sky_source` are added, and
+  every row gains low/high hours, filter mismatch, and budget applicability using pure
+  C1 math without another astropy calculation.
 - `target_detail(name,lat,lon,when=None)` → same row + dark_hours/moon/bortle; falls back
   to `FixedTarget.from_name` (Simbad) for non-catalog names.
 - `_resolve_target` is the shared catalog-first/Simbad-fallback resolver used by detail and
@@ -400,10 +407,14 @@ slightly ahead, still consistent with “no discernible difference.”
   `GET /plan/project?name&lat&lon&f_ratio&filter&tier&when&nights&sqm`,
   `GET /visibility?target&lat&lon` (now validated), `GET /health`. Projection defaults to
   broadband, clean, 30 nights, and grid/class SQM; Literal and bound failures return 422.
+  `/plan/night` also accepts optional `f_ratio/filter/tier/sqm`; omitting f-ratio preserves
+  the legacy response exactly, while providing it activates per-row budget fields.
 
 ### Web `lib`
-- `api.ts` types: `NightPlan` now includes **`bortle:number`** (and `RankedTarget`,
-  `TargetDetail`, `Visibility`). `fetchVisibility/fetchNightPlan/fetchTargetDetail`.
+- `api.ts` types: `NightPlan` includes Bortle plus optional sky provenance and row budget
+  fields. `ProjectPlan` mirrors C2's 30-night response. `fetchNightPlan` conditionally
+  forwards gear/SQM, while `fetchProject` powers the new `/api/project` proxy;
+  `fetchVisibility` and `fetchTargetDetail` remain available to existing consumers.
 - `knowledge.ts` `searchKnowledge(query,target?,opts?)`: embed (1536) →
   `supabase.rpc("hybrid_search", {query_text, query_embedding, match_count:15,
   filter_target})`. `rerank:false` still returns the raw top-5 RPC candidates. The
@@ -446,6 +457,12 @@ slightly ahead, still consistent with “no discernible difference.”
   create and delete name/f-ratio/filter rows. `PlanClient` owns the current profile list
   and selected id, persisting the latter under a client-only `localStorage` key so C4 can
   consume the selected profile without changing C3 planning requests.
+- Track C4 budget UI (2026-07-11): selecting gear activates a mobile-collapsible
+  community-range column, grid/user SQM badge, persisted validated SQM override, and the
+  required World Atlas resolution/false-precision caption. Details are loaded per target
+  through `/api/project`, never in the rank loop, and show hours, completion sessions,
+  best night, planet lucky-imaging guidance, and a dependency-free 30-night usable-hours
+  strip. Gearless requests and the anonymous five-column plan remain unchanged.
 
 ### Supabase migrations
 - `0001`: `sessions(id,user_id,title,lat,lon,planned_for,created_at)`,
@@ -517,11 +534,11 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-11: **69 unit tests pass**, 13 deselected as
-  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The two new
-  local-Astropy projection checks (M42 range and Jupiter no-budget behavior) also pass
-  when selected explicitly. Current web source passes typecheck, lint, the unchanged offline retrieval
-  table, and the 12-route production build. No-key Vitest: **44 passed + 6 live
+- **Current status:** API verified 2026-07-11: **72 unit tests pass**, 14 deselected as
+  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The C4
+  gear-aware rank integration check also passes explicitly. Current web source passes
+  typecheck, lint, the unchanged offline retrieval table, and the 13-route production
+  build. No-key Vitest: **45 passed + 6 live
   faithfulness cases skipped**. Live B3 gate: **6/6 passed** through `OpenAIJudge`.
   The B2 live A/B is recorded above (§5 item 6).
 - **How to verify locally**:
@@ -575,8 +592,8 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 ## 5. Immediate next steps & unresolved items
 
 **CI is green.** Items 0–8, Track W2 item 10, Track C1a item 11, Track C1 item 12, and
-Track C2 item 13 and Track C3 item 14 are done. Track W1 item 9 is implemented and
-offline-green; its live acceptance step remains open:
+Track C2 item 13, Track C3 item 14, and Track C4 item 15 are done. Track W1 item 9 is
+implemented and offline-green; its live acceptance step remains open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -749,6 +766,26 @@ offline-green; its live acceptance step remains open:
     API regression gate remains green at **69 passed / 13 deselected**. No dependencies
     changed.
 
+15. ✅ **Track C4 — surface budget ranges, measured SQM, and completion detail (Done
+    2026-07-11).** Optional gear parameters now flow through `/plan/night`; their absence
+    retains the legacy payload, while their presence adds one resolved sky source and
+    pure per-row budget fields. `/plan` shows honest hours ranges, planet/mismatch states,
+    the required World Atlas caveat, and a persisted client-validated SQM override. The
+    new `/api/project` proxy and typed `ProjectPlan` support an on-demand target card with
+    completion-session guidance, best night, and a zero-preserving CSS hours strip.
+    Measured local proxy output at SQM 18.4 reported M42 **34.8–69.5 h**, Jupiter budget
+    false, and the requested projection horizon. Browser QA confirmed the anonymous
+    no-profile table remains the original five columns with no console errors; the
+    available browser session was not authenticated, so gear UI mutations were not
+    attempted. Full API gate: **72 passed / 14 deselected**, plus the focused gear-rank
+    integration check. Full web gate: typecheck/ESLint clean, **45 passed + 6 skipped**,
+    and a successful **13-route** build. No dependencies or committed data changed.
+
+    **C4(d) progress tracking (stretch, open):** add nullable non-negative
+    `integration_minutes` to observations, collect optional minutes when logging, and sum
+    target progress against the modeled range. Deferred because it expands schema,
+    authenticated logging UX, and aggregation beyond the cleanly landed required slice.
+
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`
 (astropy compute), `test_routers.py::*future*` (astropy compute),
@@ -760,7 +797,7 @@ ones fail purely due to blocked network — expected.
 ## 6. How to run the whole thing (live)
 
 ```bash
-# 1. Supabase: create project; run migrations 0001→0002→0003; enable email auth;
+# 1. Supabase: create project; run migrations 0001→0002→0003→0004; enable email auth;
 #    allow http://localhost:3000/auth/callback
 #    SUPABASE_URL = bare project URL (no /rest/v1); if ingest hits 42501, run the
 #    GRANT statements in §4.

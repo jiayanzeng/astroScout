@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   bortleLabel,
+  formatHoursRange,
   formatLocalDateTime,
   lightSensitivityTier,
   ratingLabel,
@@ -55,5 +56,12 @@ describe("bortleLabel", () => {
     expect(bortleLabel(5)).toBe("suburban");
     expect(bortleLabel(0)).toBe("excellent-dark");
     expect(bortleLabel(10)).toBe("inner-city");
+  });
+});
+
+describe("formatHoursRange", () => {
+  it("keeps both community-anchored endpoints visible", () => {
+    expect(formatHoursRange(6, 12)).toBe("~6–12 h");
+    expect(formatHoursRange(1.5, 3)).toBe("~1.5–3 h");
   });
 });

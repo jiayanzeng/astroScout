@@ -31,6 +31,15 @@ def test_plan_night_rejects_malformed_when() -> None:
 
 
 @pytest.mark.parametrize(
+    ("parameter", "value"),
+    [("f_ratio", 0), ("filter", "solar"), ("sqm", 30)],
+)
+def test_plan_night_rejects_invalid_budget_values(parameter: str, value: object) -> None:
+    params: dict[str, object] = {"lat": 0, "lon": 0, parameter: value}
+    assert client.get("/plan/night", params=params).status_code == 422
+
+
+@pytest.mark.parametrize(
     ("override", "value"),
     [
         ("when", "not-a-date"),

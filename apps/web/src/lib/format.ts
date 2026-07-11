@@ -54,3 +54,8 @@ export function bortleLabel(bortle: number): string {
   const normalized = Math.min(9, Math.max(1, Math.round(bortle)));
   return BORTLE_LABELS[normalized - 1];
 }
+
+/** Format an honest integration-time range without implying single-value precision. */
+export function formatHoursRange(low: number, high: number): string {
+  return `~${low}–${high} h`;
+}

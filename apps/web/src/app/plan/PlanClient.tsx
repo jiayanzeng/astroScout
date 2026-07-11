@@ -4,13 +4,15 @@ import { useEffect, useState, useTransition } from "react";
 
 import { logObservation, saveSession } from "@/app/plan/actions";
 import { GearCard } from "@/app/plan/GearCard";
+import { ProjectDetailCard } from "@/app/plan/ProjectDetailCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { NightPlan, RankedTarget } from "@/lib/api";
+import type { NightPlan, ProjectPlan, RankedTarget } from "@/lib/api";
 import {
   bortleLabel,
+  formatHoursRange,
   formatLocalDateTime,
   lightSensitivityTier,
   type LightSensitivityTier,
@@ -18,6 +20,7 @@ import {
 import type { GearProfile } from "@/lib/supabase/types";
 
 const SELECTED_GEAR_STORAGE_KEY = "astroscout:selected-gear-profile";
+const SKY_SQM_STORAGE_KEY = "astroscout:sky-sqm";
 
 const LP_TIER_VARIANT: Record<LightSensitivityTier, "good" | "marginal" | "poor"> = {
   robust: "good",
@@ -42,7 +45,7 @@ function bortleBadgeClass(bortle: number): string {
   return "border-rose-400/20 bg-rose-500/15 text-rose-300";
 }
 
-function LoadingRows() {
+function LoadingRows({ showBudget }: { showBudget: boolean }) {
   return Array.from({ length: 5 }, (_, index) => (
     <tr key={index} className="border-b last:border-0">
       <td className="py-3 pr-3">
@@ -60,6 +63,16 @@ function LoadingRows() {
       <td className="py-3 pr-3">
         <div className="bg-muted h-5 w-16 animate-pulse rounded" />
       </td>
+      {showBudget && (
+        <td className="hidden py-3 pr-3 sm:table-cell">
+          <div className="bg-muted h-4 w-20 animate-pulse rounded" />
+        </td>
+      )}
+      {showBudget && (
+        <td className="py-3">
+          <div className="bg-muted h-7 w-16 animate-pulse rounded" />
+        </td>
+      )}
     </tr>
   ));
 }
@@ -79,6 +92,11 @@ export function PlanClient({
   const [gearProfiles, setGearProfiles] = useState(initialGearProfiles);
   const [selectedGearProfileId, setSelectedGearProfileId] = useState<string | null>(null);
   const [gearSelectionLoaded, setGearSelectionLoaded] = useState(false);
+  const [skySqm, setSkySqm] = useState("");
+  const [project, setProject] = useState<ProjectPlan | null>(null);
+  const [projectTarget, setProjectTarget] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,6 +109,8 @@ export function PlanClient({
       if (savedId && initialGearProfiles.some((profile) => profile.id === savedId)) {
         setSelectedGearProfileId(savedId);
       }
+      const savedSqm = window.localStorage.getItem(SKY_SQM_STORAGE_KEY);
+      if (savedSqm) setSkySqm(savedSqm);
       setGearSelectionLoaded(true);
     }, 0);
     return () => window.clearTimeout(restore);
@@ -103,16 +123,54 @@ export function PlanClient({
     } else {
       window.localStorage.removeItem(SELECTED_GEAR_STORAGE_KEY);
     }
-  }, [gearSelectionLoaded, selectedGearProfileId]);
+    if (skySqm) {
+      window.localStorage.setItem(SKY_SQM_STORAGE_KEY, skySqm);
+    } else {
+      window.localStorage.removeItem(SKY_SQM_STORAGE_KEY);
+    }
+  }, [gearSelectionLoaded, selectedGearProfileId, skySqm]);
+
+  const selectedGearProfile =
+    gearProfiles.find((profile) => profile.id === selectedGearProfileId) ?? null;
+
+  function parsedSkySqm(): number | undefined {
+    if (!skySqm.trim()) return undefined;
+    const value = Number(skySqm);
+    return Number.isFinite(value) && value >= 15 && value <= 22.1 ? value : undefined;
+  }
+
+  function validateSkySqm(): number | undefined | null {
+    const value = parsedSkySqm();
+    if (skySqm.trim() && value === undefined) {
+      setError("Measured SQM must be between 15.0 and 22.1.");
+      return null;
+    }
+    return value;
+  }
+
+  function selectGear(profileId: string | null) {
+    setSelectedGearProfileId(profileId);
+    setPlan(null);
+    setProject(null);
+    setProjectTarget(null);
+  }
 
   async function runPlan(whenOverride?: string) {
     const w = whenOverride ?? when;
+    const sqm = selectedGearProfile ? validateSkySqm() : undefined;
+    if (sqm === null) return;
     setLoading(true);
     setError(null);
     setSessionId(null);
     try {
       const params = new URLSearchParams({ lat, lon });
       if (w) params.set("when", w);
+      if (selectedGearProfile) {
+        params.set("f_ratio", String(selectedGearProfile.f_ratio));
+        params.set("filter", selectedGearProfile.filter_kind);
+        params.set("tier", "clean");
+        if (sqm !== undefined) params.set("sqm", String(sqm));
+      }
       const res = await fetch(`/api/plan?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "request failed");
@@ -122,6 +180,37 @@ export function PlanClient({
       setPlan(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadProject(target: RankedTarget) {
+    if (!selectedGearProfile) return;
+    const sqm = validateSkySqm();
+    if (sqm === null) return;
+    setProjectTarget(target.name);
+    setProject(null);
+    setProjectError(null);
+    setProjectLoading(true);
+    try {
+      const params = new URLSearchParams({
+        name: target.name,
+        lat,
+        lon,
+        f_ratio: String(selectedGearProfile.f_ratio),
+        filter: selectedGearProfile.filter_kind,
+        tier: "clean",
+        nights: "30",
+      });
+      if (when) params.set("when", when);
+      if (sqm !== undefined) params.set("sqm", String(sqm));
+      const response = await fetch(`/api/project?${params}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "request failed");
+      setProject(data as ProjectPlan);
+    } catch (caught) {
+      setProjectError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setProjectLoading(false);
     }
   }
 
@@ -173,6 +262,7 @@ export function PlanClient({
   }
 
   const filteredTargets = plan?.targets.filter((target) => matchesKindFilter(target, kindFilter));
+  const estimatesShown = plan?.sky_source !== undefined;
 
   return (
     <div className="flex flex-col gap-6">
@@ -181,7 +271,7 @@ export function PlanClient({
           profiles={gearProfiles}
           selectedProfileId={selectedGearProfileId}
           onProfilesChange={setGearProfiles}
-          onSelect={setSelectedGearProfileId}
+          onSelect={selectGear}
         />
       )}
 
@@ -200,6 +290,25 @@ export function PlanClient({
                 placeholder="Latitude"
               />
             </label>
+            {selectedGearProfile && (
+              <label className="text-muted-foreground flex min-w-32 flex-1 flex-col gap-1 text-xs">
+                My sky (SQM)
+                <Input
+                  type="number"
+                  min="15"
+                  max="22.1"
+                  step="0.1"
+                  value={skySqm}
+                  onChange={(event) => {
+                    setSkySqm(event.target.value);
+                    setPlan(null);
+                    setProject(null);
+                    setProjectTarget(null);
+                  }}
+                  placeholder="Optional"
+                />
+              </label>
+            )}
             <label className="text-muted-foreground flex min-w-32 flex-1 flex-col gap-1 text-xs">
               Longitude
               <Input
@@ -248,6 +357,15 @@ export function PlanClient({
                   <Badge className={bortleBadgeClass(plan.bortle)}>
                     Bortle {plan.bortle}: {bortleLabel(plan.bortle)}
                   </Badge>
+                  {estimatesShown && (
+                    <Badge variant="poor">
+                      {plan.sky_source === "user" && plan.sky_sqm != null
+                        ? `your SQM ${plan.sky_sqm.toFixed(1)}`
+                        : plan.sky_source === "grid" && plan.sky_sqm != null
+                          ? `grid SQM ${plan.sky_sqm.toFixed(1)}`
+                          : "Bortle-class sky"}
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-muted-foreground mt-1 text-xs">
                   <time dateTime={plan.dusk_utc} title={plan.dusk_utc}>
@@ -299,12 +417,18 @@ export function PlanClient({
                     <th className="py-2 pr-3 font-medium">Peak alt</th>
                     <th className="hidden py-2 pr-3 font-medium sm:table-cell">Hrs up</th>
                     <th className="py-2 pr-3 font-medium">LP sens.</th>
+                    {estimatesShown && (
+                      <th className="hidden py-2 pr-3 font-medium sm:table-cell">
+                        Est. hours (your sky)
+                      </th>
+                    )}
+                    {selectedGearProfile && <th className="py-2 font-medium" />}
                     {sessionId && <th className="py-2 font-medium" />}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <LoadingRows />
+                    <LoadingRows showBudget={selectedGearProfile !== null} />
                   ) : filteredTargets?.length ? (
                     filteredTargets.map((target, index) => (
                       <tr
@@ -345,6 +469,48 @@ export function PlanClient({
                             {lightSensitivityTier(target.light_sensitivity)}
                           </Badge>
                         </td>
+                        {estimatesShown && (
+                          <td className="hidden py-2 pr-3 whitespace-nowrap sm:table-cell">
+                            {target.budget_applicable === false ? (
+                              <span title="lucky imaging — integration budgeting doesn't apply">
+                                n/a
+                              </span>
+                            ) : target.hours_needed_low != null &&
+                              target.hours_needed_high != null ? (
+                              <span>
+                                {formatHoursRange(
+                                  target.hours_needed_low,
+                                  target.hours_needed_high,
+                                )}
+                                {target.filter_mismatch && (
+                                  <span
+                                    className="ml-1 text-amber-400"
+                                    title="narrowband filter won't help on this target — estimate assumes broadband"
+                                  >
+                                    !
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        )}
+                        {selectedGearProfile && (
+                          <td className="py-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={projectLoading && projectTarget === target.name}
+                              onClick={() => void loadProject(target)}
+                            >
+                              {projectLoading && projectTarget === target.name
+                                ? "Projecting…"
+                                : "Details"}
+                            </Button>
+                          </td>
+                        )}
                         {sessionId && (
                           <td className="py-2">
                             <Button
@@ -361,7 +527,15 @@ export function PlanClient({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={sessionId ? 6 : 5} className="text-muted-foreground py-8 text-center">
+                      <td
+                        colSpan={
+                          5 +
+                          (estimatesShown ? 1 : 0) +
+                          (selectedGearProfile ? 1 : 0) +
+                          (sessionId ? 1 : 0)
+                        }
+                        className="text-muted-foreground py-8 text-center"
+                      >
                         No targets match this filter.
                       </td>
                     </tr>
@@ -369,8 +543,29 @@ export function PlanClient({
                 </tbody>
               </table>
             </div>
+            {estimatesShown && (
+              <p className="text-muted-foreground text-xs">
+                Sky estimate from the World Atlas 2015 satellite survey at ~27 km cells —
+                dense city cores can read darker than reality; enter your measured SQM to
+                refine. Hours are community-anchored ranges, not promises.
+              </p>
+            )}
           </CardContent>
         </Card>
+      )}
+
+      {projectTarget && (
+        <ProjectDetailCard
+          project={project}
+          targetName={projectTarget}
+          loading={projectLoading}
+          error={projectError}
+          onClose={() => {
+            setProjectTarget(null);
+            setProject(null);
+            setProjectError(null);
+          }}
+        />
       )}
     </div>
   );

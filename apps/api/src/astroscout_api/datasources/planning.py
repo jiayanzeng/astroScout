@@ -161,13 +161,47 @@ def _resolve_target(name: str) -> CatalogObject:
     )
 
 
-def rank_targets(lat: float, lon: float, when: Time | None = None) -> dict[str, object]:
+def _resolve_sky(lat: float, lon: float, sqm: float | None) -> tuple[float | None, str]:
+    """Resolve sky brightness with explicit user > grid > class precedence."""
+    if sqm is not None:
+        return sqm, "user"
+    grid_sqm = sqm_at(lat, lon)
+    return grid_sqm, "grid" if grid_sqm is not None else "bortle-class"
+
+
+def rank_targets(
+    lat: float,
+    lon: float,
+    when: Time | None = None,
+    f_ratio: float | None = None,
+    filter_kind: FilterKind = "broadband",
+    tier: QualityTier = "clean",
+    sqm: float | None = None,
+) -> dict[str, object]:
     """Rank the built-in catalog for the upcoming night at this location."""
     window = dark_window(lat, lon, when)
     bortle = bortle_at(lat, lon)
-    rows = [_row(obj, conditions_for(obj, lat, lon, window, bortle)) for obj in CATALOG]
+    sky_sqm: float | None = None
+    sky_source: str | None = None
+    if f_ratio is not None:
+        sky_sqm, sky_source = _resolve_sky(lat, lon, sqm)
+
+    rows: list[dict[str, object]] = []
+    for obj in CATALOG:
+        row = _row(obj, conditions_for(obj, lat, lon, window, bortle))
+        if f_ratio is not None:
+            estimate = hours_needed(obj.kind, bortle, f_ratio, filter_kind, tier, sqm=sky_sqm)
+            row.update(
+                {
+                    "hours_needed_low": estimate.low if estimate is not None else None,
+                    "hours_needed_high": estimate.high if estimate is not None else None,
+                    "filter_mismatch": (estimate.filter_mismatch if estimate is not None else None),
+                    "budget_applicable": estimate is not None,
+                }
+            )
+        rows.append(row)
     rows.sort(key=lambda r: r["score"], reverse=True)  # type: ignore[arg-type, return-value]
-    return {
+    result: dict[str, object] = {
         "dusk_utc": str(window.dusk.iso),
         "dawn_utc": str(window.dawn.iso),
         "dark_hours": round(window.hours, 1),
@@ -175,6 +209,9 @@ def rank_targets(lat: float, lon: float, when: Time | None = None) -> dict[str, 
         "bortle": bortle,
         "targets": rows,
     }
+    if f_ratio is not None:
+        result.update({"sky_sqm": sky_sqm, "sky_source": sky_source})
+    return result
 
 
 def target_detail(name: str, lat: float, lon: float, when: Time | None = None) -> dict[str, object]:
@@ -210,13 +247,7 @@ def project_target(
     """
     obj = _resolve_target(name)
     bortle = bortle_at(lat, lon)
-    sky_sqm: float | None
-    if sqm is not None:
-        sky_sqm = sqm
-        sky_source = "user"
-    else:
-        sky_sqm = sqm_at(lat, lon)
-        sky_source = "grid" if sky_sqm is not None else "bortle-class"
+    sky_sqm, sky_source = _resolve_sky(lat, lon, sqm)
     estimate = hours_needed(obj.kind, bortle, f_ratio, filter_kind, tier, sqm=sky_sqm)
 
     anchor = when if when is not None else Time.now()

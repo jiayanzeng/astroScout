@@ -20,6 +20,10 @@ export type RankedTarget = {
   hours_visible: number;
   moon_separation_deg: number;
   light_sensitivity: number;
+  hours_needed_low?: number | null;
+  hours_needed_high?: number | null;
+  filter_mismatch?: boolean | null;
+  budget_applicable?: boolean;
 };
 
 export class ApiError extends Error {
@@ -38,7 +42,46 @@ export type NightPlan = {
   dark_hours: number;
   moon_illumination: number;
   bortle: number;
+  sky_sqm?: number | null;
+  sky_source?: "user" | "grid" | "bortle-class";
   targets: RankedTarget[];
+};
+
+export type GearPlanParams = {
+  f_ratio: number;
+  filter: "broadband" | "dual_nb" | "mono_nb";
+  tier?: "clean" | "showcase";
+  sqm?: number;
+};
+
+export type ProjectNight = {
+  date: string;
+  dusk_utc: string;
+  dawn_utc: string;
+  dark_hours: number;
+  moon_illumination: number;
+  moon_separation_deg: number;
+  hours_visible: number;
+  usable_hours: number;
+};
+
+export type ProjectPlan = {
+  target: string;
+  common_name: string;
+  kind: string;
+  bortle: number;
+  sky_sqm: number | null;
+  sky_source: "user" | "grid" | "bortle-class";
+  filter_kind: GearPlanParams["filter"];
+  tier: "clean" | "showcase";
+  f_ratio: number;
+  hours_needed: { low: number; high: number } | null;
+  filter_mismatch: boolean | null;
+  budget_applicable: boolean;
+  nights: ProjectNight[];
+  nights_to_finish: { low: number | null; high: number | null } | null;
+  horizon_nights: number;
+  best_night: string;
 };
 
 export type TargetDetail = Omit<NightPlan, "targets" | "dusk_utc" | "dawn_utc"> &
@@ -66,9 +109,20 @@ export function fetchVisibility(target: string, lat: number, lon: number): Promi
   return get<Visibility>("/visibility", { target, lat, lon });
 }
 
-export function fetchNightPlan(lat: number, lon: number, when?: string): Promise<NightPlan> {
+export function fetchNightPlan(
+  lat: number,
+  lon: number,
+  when?: string,
+  gear?: GearPlanParams,
+): Promise<NightPlan> {
   const params: Record<string, string | number> = { lat, lon };
   if (when) params.when = when;
+  if (gear) {
+    params.f_ratio = gear.f_ratio;
+    params.filter = gear.filter;
+    params.tier = gear.tier ?? "clean";
+    if (gear.sqm !== undefined) params.sqm = gear.sqm;
+  }
   return get<NightPlan>("/plan/night", params);
 }
 
@@ -76,4 +130,26 @@ export function fetchTargetDetail(name: string, lat: number, lon: number, when?:
   const params: Record<string, string | number> = { name, lat, lon };
   if (when) params.when = when;
   return get<TargetDetail>("/plan/target", params);
+}
+
+export function fetchProject(
+  name: string,
+  lat: number,
+  lon: number,
+  gear: GearPlanParams,
+  when?: string,
+  nights = 30,
+): Promise<ProjectPlan> {
+  const params: Record<string, string | number> = {
+    name,
+    lat,
+    lon,
+    f_ratio: gear.f_ratio,
+    filter: gear.filter,
+    tier: gear.tier ?? "clean",
+    nights,
+  };
+  if (when) params.when = when;
+  if (gear.sqm !== undefined) params.sqm = gear.sqm;
+  return get<ProjectPlan>("/plan/project", params);
 }

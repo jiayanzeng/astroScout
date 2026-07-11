@@ -8,7 +8,15 @@ router = APIRouter(prefix="/plan", tags=["planning"])
 
 
 @router.get("/night")
-def plan_night(lat: Lat, lon: Lon, when: When = None) -> dict[str, object]:
+def plan_night(
+    lat: Lat,
+    lon: Lon,
+    when: When = None,
+    f_ratio: FRatio | None = None,
+    filter: FilterKind = "broadband",
+    tier: QualityTier = "clean",
+    sqm: Sqm = None,
+) -> dict[str, object]:
     """Rank the built-in catalog for the upcoming astronomical night.
 
     Pass `when` to plan a future night instead of tonight.
@@ -18,7 +26,7 @@ def plan_night(lat: Lat, lon: Lon, when: When = None) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
-        return rank_targets(lat, lon, parsed)
+        return rank_targets(lat, lon, parsed, f_ratio, filter, tier, sqm)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
 

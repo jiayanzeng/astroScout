@@ -26,6 +26,24 @@ def test_rank_returns_sorted_targets() -> None:
     assert isinstance(targets, list) and len(targets) > 0
     scores = [t["score"] for t in targets]  # type: ignore[index]
     assert scores == sorted(scores, reverse=True)
+    assert "sky_sqm" not in out
+    assert "hours_needed_low" not in targets[0]  # type: ignore[operator]
+
+
+@pytest.mark.integration
+def test_rank_with_gear_adds_budget_fields_and_user_sky_provenance() -> None:
+    out = rank_targets(-36.85, 174.76, f_ratio=5.0, sqm=18.4)
+    assert out["sky_sqm"] == 18.4
+    assert out["sky_source"] == "user"
+
+    targets = out["targets"]
+    assert isinstance(targets, list)
+    m42 = next(target for target in targets if target["name"] == "M42")
+    assert m42["budget_applicable"] is True
+    assert m42["hours_needed_low"] <= m42["hours_needed_high"]
+    jupiter = next(target for target in targets if target["name"] == "Jupiter")
+    assert jupiter["budget_applicable"] is False
+    assert jupiter["hours_needed_low"] is None
 
 
 @pytest.mark.integration
