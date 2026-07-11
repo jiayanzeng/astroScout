@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,12 @@ import { Input } from "@/components/ui/input";
 import type { ChatMessage } from "@/lib/ai";
 
 type Part = ChatMessage["parts"][number];
+
+const STARTER_PROMPTS = [
+  "What should I observe tonight from Auckland?",
+  "Compare M31 and M42 for imaging tonight.",
+  "Why is the Orion Nebula scientifically interesting?",
+];
 
 function ToolBox({ children }: { children: React.ReactNode }) {
   return <div className="mt-1 rounded-md border bg-muted/40 px-3 py-2 text-xs">{children}</div>;
@@ -94,7 +100,12 @@ function KnowledgeTool({ part }: { part?: Extract<Part, { type: "tool-searchKnow
 export default function ChatPage() {
   const { messages, sendMessage, status, error, regenerate } = useChat<ChatMessage>();
   const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const canSend = status === "ready" || status === "error";
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, status]);
 
   function submit() {
     if (!input.trim() || !canSend) return;
@@ -102,11 +113,37 @@ export default function ChatPage() {
     setInput("");
   }
 
+  function sendStarter(text: string) {
+    if (!canSend) return;
+    sendMessage({ text });
+  }
+
   return (
-    <main className="mx-auto flex h-dvh max-w-xl flex-col gap-4 px-4 py-8">
-      <h1 className="text-xl font-semibold tracking-tight">AstroScout copilot</h1>
+    <main className="mx-auto flex h-[calc(100dvh-3rem)] max-w-xl flex-col gap-4 px-4 py-8">
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight">AstroScout copilot</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Plan a night, inspect a target, or explore the cited astronomy literature.
+        </p>
+      </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto">
+        {messages.length === 0 && (
+          <div className="flex flex-col gap-2" aria-label="Starter prompts">
+            {STARTER_PROMPTS.map((prompt) => (
+              <Button
+                key={prompt}
+                type="button"
+                variant="outline"
+                className="h-auto justify-start whitespace-normal py-2 text-left"
+                onClick={() => sendStarter(prompt)}
+                disabled={!canSend}
+              >
+                {prompt}
+              </Button>
+            ))}
+          </div>
+        )}
         {messages.map((m) => (
           <div key={m.id} className="text-sm">
             <span className="text-muted-foreground font-medium">
@@ -134,6 +171,7 @@ export default function ChatPage() {
             </Button>
           </div>
         )}
+        <div ref={messagesEndRef} aria-hidden="true" />
       </div>
 
       <div className="flex gap-2">

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { lightSensitivityTier, ratingLabel } from "@/lib/format";
+import {
+  bortleLabel,
+  formatLocalDateTime,
+  lightSensitivityTier,
+  ratingLabel,
+} from "@/lib/format";
 
 describe("ratingLabel", () => {
   it("maps good", () => expect(ratingLabel("good")).toMatch(/Great/));
@@ -25,5 +30,30 @@ describe("lightSensitivityTier", () => {
     expect(lightSensitivityTier(0.61)).toBe("fragile");
     expect(lightSensitivityTier(0.9)).toBe("fragile");
     expect(lightSensitivityTier(1.0)).toBe("fragile");
+  });
+});
+
+describe("formatLocalDateTime", () => {
+  it("formats an ISO timestamp in the requested time zone", () => {
+    expect(formatLocalDateTime("2026-07-11T20:05:00Z", "UTC")).toBe("Jul 11, 8:05 PM");
+  });
+
+  it("converts the timestamp instead of slicing the UTC text", () => {
+    expect(formatLocalDateTime("2026-07-11T20:05:00Z", "Pacific/Auckland")).toBe(
+      "Jul 12, 8:05 AM",
+    );
+  });
+});
+
+describe("bortleLabel", () => {
+  it("labels the dark and bright endpoints", () => {
+    expect(bortleLabel(1)).toBe("excellent-dark");
+    expect(bortleLabel(9)).toBe("inner-city");
+  });
+
+  it("labels intermediate classes and clamps out-of-range values", () => {
+    expect(bortleLabel(5)).toBe("suburban");
+    expect(bortleLabel(0)).toBe("excellent-dark");
+    expect(bortleLabel(10)).toBe("inner-city");
   });
 });

@@ -361,6 +361,15 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
   calls. The chat route therefore uses stateless Chat Completions via `openai.chat(...)`;
   the one-shot reranker and faithfulness judge remain on the default Responses provider.
   See §5 items 2 and 9.
+- Track W2 web shell/UX (2026-07-11): `layout.tsx` is still a server component and now
+  renders a sticky one-row Plan/Sessions/Chat shell with Supabase-aware sign-in or
+  email/sign-out affordances. The root applies the existing `.dark` token set by default.
+  `/plan` adds guarded browser geolocation (coordinates rounded to two decimals), local
+  dusk/dawn formatting with the UTC values retained in `title`, a labelled/color-coded
+  Bortle badge, kind filters, score bars, top-row emphasis, loading skeletons, and a
+  mobile-hidden hours column. Pure `formatLocalDateTime` and `bortleLabel` helpers are
+  unit-tested. `/chat` adds three starter prompts and smooth auto-scroll while preserving
+  W1's defensive tool rendering and error recovery. No dependencies or API payloads changed.
 
 ### Supabase migrations
 - `0001`: `sessions(id,user_id,title,lat,lon,planned_for,created_at)`,
@@ -431,7 +440,7 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
   integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The added
   pure test proves planet sensitivity is `0.0` and Bortle 9 is neutral; the Jupiter
   built-in-ephemeris check is integration-gated. Current web source passes typecheck, lint, the unchanged offline retrieval
-  table, and the 12-route production build. No-key Vitest: **40 passed + 6 live
+  table, and the 12-route production build. No-key Vitest: **44 passed + 6 live
   faithfulness cases skipped**. Live B3 gate: **6/6 passed** through `OpenAIJudge`.
   The B2 live A/B is recorded above (§5 item 6).
 - **How to verify locally**:
@@ -484,9 +493,9 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–8 are done. Track W item 9 is implemented and offline-green;
-its real-relay multi-tool acceptance check remains open because the sandbox has no live
-OpenAI/relay access:
+**CI is green.** Items 0–8 and Track W2 item 10 are done. Track W1 item 9 is implemented
+and offline-green; its real-relay multi-tool acceptance check remains open because the
+sandbox has no live OpenAI/relay access:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -574,6 +583,21 @@ OpenAI/relay access:
    required real-machine prompt chaining `planNight` → `getTargetDetail` →
    `searchKnowledge` still needs confirmation of zero `fc_...` / `msg_...` 400s; live
    relay access is unavailable in the sandbox, so this item is not marked fully done.
+10. ✅ **Track W2 — shared shell, dark default, and plan/chat polish (Done
+    2026-07-11).** Added a sticky mobile-safe app shell with Plan/Sessions/Chat links and
+    Supabase-aware auth, removed `/plan`'s duplicate local nav, and applied the existing
+    dark tokens at the root. `/plan` now has guarded two-decimal geolocation, labelled
+    controls, local dusk/dawn display with UTC tooltips, a contextual Bortle badge, five
+    client-side kind filters, score bars, top-result emphasis, loading skeletons, and a
+    mobile-hidden hours column. `/chat` gains three starter prompts and smooth auto-scroll;
+    W1 error recovery is unchanged. Four new formatter tests cover time-zone conversion,
+    Bortle endpoints/intermediate labels, and clamping. Dark-mode visual QA covered
+    `/plan`, computed results and all Badge variants, `/chat`, and `/login` at desktop and
+    390 px mobile width; `/sessions` correctly redirects anonymous users to the inspected
+    login surface. The header stayed on one row, filters and skeletons were exercised, and
+    no token adjustment was necessary. Full web gate: typecheck and ESLint clean, Vitest
+    **44 passed + 6 skipped**, and the production build emits **12 dynamic routes**. No
+    dependencies or backend behavior changed.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`
