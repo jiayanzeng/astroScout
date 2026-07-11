@@ -117,7 +117,11 @@ def conditions_for(
     target_at_peak = (
         target_coord if obj.body is None else get_body(obj.body, times[peak_idx], location)
     )
-    sep = float(moon.separation(target_at_peak).deg)
+    # Compare in one frame. Fixed catalog coordinates are ICRS while ``get_body``
+    # returns GCRS; separating them directly makes the answer depend on transform
+    # direction and emits NonRotationTransformationWarning on every plan request.
+    target_in_moon_frame = target_at_peak.transform_to(moon.frame)
+    sep = float(moon.separation(target_in_moon_frame).deg)
 
     return TargetConditions(
         altitude_deg=round(peak_alt, 1),

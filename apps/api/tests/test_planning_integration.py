@@ -1,6 +1,9 @@
 """Planner uses astropy compute (no network for catalog targets)."""
 
+import warnings
+
 import pytest
+from astropy.coordinates import NonRotationTransformationWarning
 from astropy.time import Time
 
 from astroscout_api.datasources.dso_catalog import get
@@ -57,6 +60,20 @@ def test_jupiter_is_visible_near_opposition() -> None:
     assert conditions.altitude_deg > 20.0
     assert conditions.hours_visible > 0.0
     assert conditions.light_sensitivity == 0.0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("target_name", ["M42", "Jupiter"])
+def test_conditions_compare_moon_and_target_in_one_frame(target_name: str) -> None:
+    target = get(target_name)
+    assert target is not None
+    window = dark_window(-36.85, 174.76, Time("2026-08-15T12:00:00", scale="utc"))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", NonRotationTransformationWarning)
+        conditions = conditions_for(target, -36.85, 174.76, window, bortle=4)
+
+    assert 0.0 <= conditions.moon_separation_deg <= 180.0
 
 
 @pytest.mark.integration

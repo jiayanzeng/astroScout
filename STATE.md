@@ -379,8 +379,11 @@ slightly ahead, still consistent with “no discernible difference.”
 - `conditions_for(obj,lat,lon,window,bortle)` → samples altitude over the night
   (20-min grid), peak alt + hours-above-floor + moon sep at peak. Fixed targets use
   J2000 coordinates; moving bodies use `get_body` across the time grid and again at
-  peak for moon separation. Astropy's built-in ephemeris is planning-grade, not
-  precision astrometry, and needs no network. Sets `bortle` and kind sensitivity.
+  peak for moon separation. Before separation, the target is transformed into the
+  Moon's GCRS frame; this removes transform-direction ambiguity and the former
+  `NonRotationTransformationWarning` flood. Astropy's built-in ephemeris is
+  planning-grade, not precision astrometry, and needs no network. Sets `bortle` and
+  kind sensitivity.
 - `rank_targets(lat,lon,when=None, f_ratio=None, filter_kind="broadband", tier="clean",
   sqm=None)` ranks all 19 local targets → `{dusk_utc, dawn_utc, dark_hours,
   moon_illumination, bortle, targets:[{name, common_name, kind, score, rating,
@@ -591,9 +594,8 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–8, Track W2 item 10, Track C1a item 11, Track C1 item 12, and
-Track C2 item 13, Track C3 item 14, and Track C4 item 15 are done. Track W1 item 9 is
-implemented and offline-green; its live acceptance step remains open:
+**CI is green.** Items 0–16 are done. C4(d) remains an explicitly deferred stretch and
+the Track C follow-up backlog below remains open where marked:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -669,18 +671,19 @@ implemented and offline-green; its live acceptance step remains open:
    coordinates. No web change was needed: existing rows already render kind `planet` with
    the robust LP badge. Full API gate: Ruff lint/format and mypy clean; 43 passed / 11
    deselected.
-9. ⚠️ **Track W1 — relay-safe chat tool loops + error recovery (Implemented offline
-   2026-07-11; live acceptance pending).** The `/api/chat` route now uses stateless Chat
+9. ✅ **Track W1 — relay-safe chat tool loops + error recovery (Done 2026-07-12).**
+   The `/api/chat` route now uses stateless Chat
    Completions (`openai.chat("gpt-4o-mini")`) so follow-up tool steps resend ordinary
    messages instead of relay-missing Responses item IDs. The one-shot LLM reranker and
    faithfulness judge intentionally remain on the already-verified default Responses
    provider. The chat client ignores missing-state and unrecognized tool parts, shows a
    generic inline stream error with Retry (`regenerate()`), and permits a fresh send from
    either `ready` or `error`. Offline web gate is green: typecheck and ESLint clean,
-   Vitest **40 passed + 6 skipped**, and the production build emits **12 routes**. The
-   required real-machine prompt chaining `planNight` → `getTargetDetail` →
-   `searchKnowledge` still needs confirmation of zero `fc_...` / `msg_...` 400s; live
-   relay access is unavailable in the sandbox, so this item is not marked fully done.
+   Vitest **40 passed + 6 skipped**, and the production build emits **12 routes**.
+   Live acceptance on 2026-07-12 completed one Auckland/M42 prompt through
+   `planNight` → `getTargetDetail` → `searchKnowledge`: all three tool cards and the
+   grounded answer rendered, `/api/chat` returned 200, and the server log contained
+   zero `fc_...` / `msg_...` 400s.
 10. ✅ **Track W2 — shared shell, dark default, and plan/chat polish (Done
     2026-07-11).** Added a sticky mobile-safe app shell with Plan/Sessions/Chat links and
     Supabase-aware auth, removed `/plan`'s duplicate local nav, and applied the existing
@@ -766,6 +769,12 @@ implemented and offline-green; its live acceptance step remains open:
     API regression gate remains green at **69 passed / 13 deselected**. No dependencies
     changed.
 
+    **Maintainer live verification (2026-07-12):** migration `0004` is applied in the
+    configured Supabase project and multiple signed-in `createGearProfile` actions
+    returned 200. This confirms the live migration and authenticated create path. The
+    supplied transcript did not exercise delete or cross-user RLS, so those are not
+    claimed as live-verified.
+
 15. ✅ **Track C4 — surface budget ranges, measured SQM, and completion detail (Done
     2026-07-11).** Optional gear parameters now flow through `/plan/night`; their absence
     retains the legacy payload, while their presence adds one resolved sky source and
@@ -785,6 +794,34 @@ implemented and offline-green; its live acceptance step remains open:
     `integration_minutes` to observations, collect optional minutes when logging, and sum
     target progress against the modeled range. Deferred because it expands schema,
     authenticated logging UX, and aggregation beyond the cleanly landed required slice.
+
+16. ✅ **Track closeout hardening (Done 2026-07-12).** Moon separation now compares
+    targets and the Moon in one GCRS frame instead of suppressing Astropy's transform
+    warning; two fixed/moving regression cases promote the former warning to an error.
+    Starlette's officially recommended `httpx2>=2.5` is now a dev-only dependency, so
+    `TestClient` no longer emits its plain-httpx deprecation warning. The final API gate
+    is clean at **72 passed / 16 deselected**, all **8** planner integration cases pass,
+    and the web gate remains **45 passed + 6 skipped** with a successful **13-route**
+    build. Python 3.12.13 parity was also verified in an isolated environment without
+    replacing the maintainer's existing Python 3.13 `.venv`.
+
+### Track C follow-up backlog (recorded 2026-07-12)
+
+- **Polar dark-window handling (open, low priority):** replace predictable 502 responses
+  near the poles with a structured continuous-darkness / no-dark-window result.
+- **Grown-corpus retrieval evaluation (open):** rerun hybrid versus LLM rerank on the
+  253-chunk / 19-target corpus and add planet-labelled cases before making new claims.
+- **Moon-separation warning noise (done 2026-07-12):** compare target and Moon in one
+  GCRS frame. Fixed- and moving-target integration tests now fail on recurrence.
+- **Python environment parity (verified; local cleanup optional):** the full gate passes
+  under isolated Python 3.12.13. The maintainer's existing `.venv` remains on 3.13.13;
+  recreate it only if exact day-to-day CI parity is desired.
+- **Dark-nebula taxonomy (open):** split silhouettes on emission from broadband dust
+  before expanding the catalog, so filter coupling no longer depends on the IC434 case.
+- **City-core SQM resolution (open):** retain the measured-SQM override as the practical
+  mitigation; investigate a finer sidecar only if evidence justifies the data cost.
+- **Per-user calibration (blocked on C4(d)):** use logged integration minutes and rated
+  outcomes to personalize base-hour estimates only after progress capture exists.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`

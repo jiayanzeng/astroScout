@@ -54,12 +54,13 @@ value behind the existing Supabase auth first; billing is its own later track.
 
 ## C-gate — validate in the community before writing code (no-code, ~1 week)
 
-**Status: still open — this gate has not been run yet and it still precedes C1.**
-(W1/W2 and C1a are exempt: W1 is a bug fix, W2 is general polish, and C1a is
-calibration hygiene that improves the already-shipped B1 grid regardless of Track C.)
+**Status: passed 2026-07-11.** The maintainer's community-validation report found the
+required signal: experienced users reject false precision but actively engage with
+transparent ranges, assumptions, and sky/gear inputs. The supporting discussions are
+recorded in `docs/plans/2026-07-11-c1-budget-estimator.md`; C1 was authorized and shipped.
 
-Not a Cline task. Post in Cloudy Nights (Beginning Deep Sky Imaging) and
-r/AskAstrophotography with 2–3 mockups of the nights-to-finish table and one direct
+This was a maintainer validation task rather than a Cline implementation task. The
+review covered Cloudy Nights and r/AskAstrophotography discussions around the direct
 question: *"would this have changed what you pointed at last new moon?"*
 
 - Disconfirming signal: the "it depends" culture rejecting any estimate as false
@@ -631,14 +632,16 @@ question: *"would this have changed what you pointed at last new moon?"*
   (planets ingested 2026-07-11). Re-run hybrid vs LLM-rerank once, and consider adding
   planet-labelled cases to `evals/dataset.ts` so retrieval quality on the new rows is
   measured, not assumed.
-- **Warning noise:** `NonRotationTransformationWarning` floods the server log on every
-  plan (moon-separation transforms in `conditions_for`). Cosmetic; a targeted
-  `warnings.filterwarnings` scoped to that astropy category in `planning.py` with a
-  comment would clean logs without hiding real issues.
-- **Local venv drift:** the 2026-07-11 pytest run executed on Python 3.13
+- **Warning noise (resolved 2026-07-12):** `NonRotationTransformationWarning` flooded
+  the server log because fixed ICRS targets were separated directly from the GCRS Moon.
+  `conditions_for` now transforms the target into the Moon frame before separation;
+  focused fixed/moving-body tests promote that warning to an error. No warning filter
+  was needed.
+- **Local venv drift (CI parity verified 2026-07-12):** the local pytest run executes on Python 3.13
   (`.venv/lib/python3.13/...`) while the project pins 3.12 (`.python-version`, CI,
-  Dockerfile, mypy). `requires-python = ">=3.12"` permits it, but recreate the venv
-  with `uv venv --python 3.12 && uv sync` for CI parity.
+  Dockerfile, mypy). `requires-python = ">=3.12"` permits it. The full gate also passes
+  in an isolated Python 3.12.13 environment; recreate the local venv only if exact
+  day-to-day CI parity is desired.
 - **Dark-nebula split (was the B4 note; B4 itself is done):** split `dark nebula` into
   silhouette-on-emission vs broadband dust so `EMISSION_KINDS` stops special-casing
   IC434 when the catalog gains true dust clouds.
