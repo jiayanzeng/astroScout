@@ -349,10 +349,18 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 - `ai.ts`: tools `planNight`, `getTargetDetail`, `searchKnowledge`; typed `ChatMessage =
   UIMessage<never,UIDataTypes,InferUITools<typeof tools>>`. Chat route uses
   `await convertToModelMessages(...)` (v6 is async), `stopWhen: stepCountIs(6)`,
-  `toUIMessageStreamResponse()`. Client uses `useChat<ChatMessage>()` + `sendMessage({text})`.
-- Relay note (v0.6.1): all web OpenAI calls use the default `openai` provider instance,
-  which reads `OPENAI_API_KEY` **and** `OPENAI_BASE_URL` from env — set both in
-  `.env.local` to route through a relay. See §5 item 2 for the Responses-API caveat.
+  `toUIMessageStreamResponse()`, and the stateless `openai.chat("gpt-4o-mini")` provider
+  for multi-step tool loops. Client uses `useChat<ChatMessage>()` + `sendMessage({text})`,
+  ignores incomplete/unrecognized tool parts, and exposes retry plus a fresh-send path
+  after stream errors.
+- Relay note (v0.6.1, corrected 2026-07-11): web OpenAI providers read
+  `OPENAI_API_KEY` **and** `OPENAI_BASE_URL` from env — set both in `.env.local` to route
+  through a relay. The original live check established that the configured relay supports
+  **single-step** Responses API calls. A later multi-step chat test showed that it does not
+  persist the prior `fc_...` / `msg_...` response items referenced by follow-up Responses
+  calls. The chat route therefore uses stateless Chat Completions via `openai.chat(...)`;
+  the one-shot reranker and faithfulness judge remain on the default Responses provider.
+  See §5 items 2 and 9.
 
 ### Supabase migrations
 - `0001`: `sessions(id,user_id,title,lat,lon,planned_for,created_at)`,
@@ -476,7 +484,9 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–8 are done; no item in this handoff list remains open:
+**CI is green.** Items 0–8 are done. Track W item 9 is implemented and offline-green;
+its real-relay multi-tool acceptance check remains open because the sandbox has no live
+OpenAI/relay access:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -492,7 +502,12 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
    `streamText` (`/chat`) and `generateObject` (LLM reranker, `judge-openai.ts`) were
    tested through the configured relay (`OPENAI_BASE_URL=https://www.dmxapi.cn/v1`) using
    `openai("gpt-4o-mini")` (Responses API, `/v1/responses`). Both succeeded without code
-   changes — the relay supports the Responses API. No switch to `openai.chat(...)` needed.
+   changes — this proved the relay supports **single-step** Responses API calls.
+   **Correction (2026-07-11):** multi-step chat tool loops were not covered by that test.
+   Follow-up Responses calls reference prior `fc_...` / `msg_...` items by ID, and the
+   relay does not persist them, so those turns fail after the first step. Track W1 (§5
+   item 9) switches only the chat route to stateless `openai.chat(...)`; the successful
+   one-shot reranker and judge paths remain unchanged.
 3. ✅ **Measure the live cross-encoder rerank lift (Done 2026-07-09).** Ingest: 203
    chunks across 15 targets (no zeros). Live eval (LLM reranker, gpt-4o-mini):
    hybrid recall@3=0.36 / MRR=0.43 / nDCG@5=0.45; hybrid+rerank recall@3=0.57 /
@@ -547,6 +562,18 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
    coordinates. No web change was needed: existing rows already render kind `planet` with
    the robust LP badge. Full API gate: Ruff lint/format and mypy clean; 43 passed / 11
    deselected.
+9. ⚠️ **Track W1 — relay-safe chat tool loops + error recovery (Implemented offline
+   2026-07-11; live acceptance pending).** The `/api/chat` route now uses stateless Chat
+   Completions (`openai.chat("gpt-4o-mini")`) so follow-up tool steps resend ordinary
+   messages instead of relay-missing Responses item IDs. The one-shot LLM reranker and
+   faithfulness judge intentionally remain on the already-verified default Responses
+   provider. The chat client ignores missing-state and unrecognized tool parts, shows a
+   generic inline stream error with Retry (`regenerate()`), and permits a fresh send from
+   either `ready` or `error`. Offline web gate is green: typecheck and ESLint clean,
+   Vitest **40 passed + 6 skipped**, and the production build emits **12 routes**. The
+   required real-machine prompt chaining `planNight` → `getTargetDetail` →
+   `searchKnowledge` still needs confirmation of zero `fc_...` / `msg_...` 400s; live
+   relay access is unavailable in the sandbox, so this item is not marked fully done.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`

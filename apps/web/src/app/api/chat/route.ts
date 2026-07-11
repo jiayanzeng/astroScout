@@ -9,7 +9,8 @@ export async function POST(req: Request) {
   const { messages }: { messages: ChatMessage[] } = await req.json();
 
   const result = streamText({
-    model: openai("gpt-4o-mini"),
+    // Multi-step tool loops must not depend on relay-persisted Responses item IDs.
+    model: openai.chat("gpt-4o-mini"),
     system:
       "You are AstroScout, an astronomy observation-planning copilot for amateur " +
       "astronomers. Decide what deep-sky objects are worth observing tonight and " +

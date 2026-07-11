@@ -14,7 +14,8 @@ function ToolBox({ children }: { children: React.ReactNode }) {
   return <div className="mt-1 rounded-md border bg-muted/40 px-3 py-2 text-xs">{children}</div>;
 }
 
-function PlanNightTool({ part }: { part: Extract<Part, { type: "tool-planNight" }> }) {
+function PlanNightTool({ part }: { part?: Extract<Part, { type: "tool-planNight" }> }) {
+  if (!part?.state) return null;
   if (part.state === "output-error")
     return <ToolBox><span className="text-destructive">⚠️ planNight: {part.errorText}</span></ToolBox>;
   if (part.state !== "output-available")
@@ -38,7 +39,8 @@ function PlanNightTool({ part }: { part: Extract<Part, { type: "tool-planNight" 
   );
 }
 
-function TargetDetailTool({ part }: { part: Extract<Part, { type: "tool-getTargetDetail" }> }) {
+function TargetDetailTool({ part }: { part?: Extract<Part, { type: "tool-getTargetDetail" }> }) {
+  if (!part?.state) return null;
   if (part.state === "output-error")
     return <ToolBox><span className="text-destructive">⚠️ getTargetDetail: {part.errorText}</span></ToolBox>;
   if (part.state !== "output-available")
@@ -56,7 +58,8 @@ function TargetDetailTool({ part }: { part: Extract<Part, { type: "tool-getTarge
   );
 }
 
-function KnowledgeTool({ part }: { part: Extract<Part, { type: "tool-searchKnowledge" }> }) {
+function KnowledgeTool({ part }: { part?: Extract<Part, { type: "tool-searchKnowledge" }> }) {
+  if (!part?.state) return null;
   if (part.state === "output-error")
     return <ToolBox><span className="text-destructive">⚠️ searchKnowledge: {part.errorText}</span></ToolBox>;
   if (part.state !== "output-available")
@@ -89,11 +92,12 @@ function KnowledgeTool({ part }: { part: Extract<Part, { type: "tool-searchKnowl
 }
 
 export default function ChatPage() {
-  const { messages, sendMessage, status } = useChat<ChatMessage>();
+  const { messages, sendMessage, status, error, regenerate } = useChat<ChatMessage>();
   const [input, setInput] = useState("");
+  const canSend = status === "ready" || status === "error";
 
   function submit() {
-    if (!input.trim()) return;
+    if (!input.trim() || !canSend) return;
     sendMessage({ text: input });
     setInput("");
   }
@@ -109,6 +113,7 @@ export default function ChatPage() {
               {m.role === "user" ? "You" : "AstroScout"}:{" "}
             </span>
             {m.parts.map((part, i) => {
+              if (!part || typeof part !== "object" || !("type" in part)) return null;
               if (part.type === "text") return <span key={i}>{part.text}</span>;
               if (part.type === "tool-planNight") return <PlanNightTool key={i} part={part} />;
               if (part.type === "tool-getTargetDetail") return <TargetDetailTool key={i} part={part} />;
@@ -118,6 +123,17 @@ export default function ChatPage() {
           </div>
         ))}
         {status === "submitted" && <p className="text-muted-foreground text-sm">Thinking…</p>}
+        {error && (
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/10 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+          >
+            <span className="text-destructive">Something went wrong talking to the model.</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void regenerate()}>
+              Retry
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2">
@@ -127,7 +143,7 @@ export default function ChatPage() {
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="Why is the Orion Nebula a good target, and what's the science?"
         />
-        <Button onClick={submit} disabled={status !== "ready"}>
+        <Button onClick={submit} disabled={!canSend}>
           Send
         </Button>
       </div>
