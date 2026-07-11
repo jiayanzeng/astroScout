@@ -53,10 +53,16 @@ def test_score_bounded_0_100() -> None:
 
 # --- light pollution ---
 def test_sensitivity_by_kind() -> None:
+    assert light_sensitivity_for_kind("planet") == 0.0
     assert light_sensitivity_for_kind("galaxy") == 0.90
     assert light_sensitivity_for_kind("open cluster") == 0.15
     assert light_sensitivity_for_kind("Globular Cluster") == 0.25  # case-insensitive
     assert light_sensitivity_for_kind("totally unknown") == 0.55  # default
+
+
+def test_planet_is_neutral_to_light_pollution() -> None:
+    sensitivity = light_sensitivity_for_kind("planet")
+    assert light_pollution_factor(9, sensitivity) == 1.0
 
 
 def test_lp_factor_pristine_is_neutral() -> None:

@@ -1,8 +1,9 @@
-"""A small built-in catalog of popular deep-sky objects.
+"""A small built-in catalog of popular deep-sky objects and bright planets.
 
-Coordinates are J2000 (RA hours, Dec degrees). Keeping a local catalog means the
-planner works offline and fast; Simbad resolution stays available for anything
-not listed here.
+Fixed-object coordinates are J2000 (RA hours, Dec degrees). Moving bodies carry an
+Astropy body name instead; their RA/Dec fields are unused placeholders. Keeping a
+local catalog means the planner works offline and fast, while Simbad resolution
+stays available for anything not listed here.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ class CatalogObject:
     dec_deg: float
     kind: str
     common_name: str
+    body: str | None = None
 
 
 CATALOG: tuple[CatalogObject, ...] = (
@@ -35,6 +37,10 @@ CATALOG: tuple[CatalogObject, ...] = (
     CatalogObject("M8", 18.060, -24.38, "emission nebula", "Lagoon Nebula"),
     CatalogObject("M20", 18.045, -23.03, "emission nebula", "Trifid Nebula"),
     CatalogObject("M104", 12.667, -11.62, "galaxy", "Sombrero Galaxy"),
+    CatalogObject("Jupiter", 0.0, 0.0, "planet", "Jupiter", body="jupiter"),
+    CatalogObject("Saturn", 0.0, 0.0, "planet", "Saturn", body="saturn"),
+    CatalogObject("Mars", 0.0, 0.0, "planet", "Mars", body="mars"),
+    CatalogObject("Venus", 0.0, 0.0, "planet", "Venus", body="venus"),
 )
 
 BY_NAME: dict[str, CatalogObject] = {obj.name.upper(): obj for obj in CATALOG}

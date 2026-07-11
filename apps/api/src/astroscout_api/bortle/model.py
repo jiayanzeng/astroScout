@@ -2,11 +2,11 @@
 
 HONEST FRAMING: the committed **grid** (`bortle_grid.npy`) is now derived from the
 World Atlas 2015 (Falchi et al. 2016, VIIRS DNB propagated via the Cinzano–Falchi
-radiative-transfer model, SQM-calibrated), aggregated to 0.25° by 75th percentile 
-(Resampling.q3; see scripts/build_bortle_grid_viirs.py). At 0.25° (~27 km) even q3 
-keeps major city cores at Bortle 7 — city-core Bortle is resolution-limited here, 
-an observed result, not a value to tune away. This model.py estimator itself 
-— a Walker-law city-light falloff computed from a curated set of major 
+radiative-transfer model, SQM-calibrated), aggregated to 0.25° by 75th percentile
+(Resampling.q3; see scripts/build_bortle_grid_viirs.py). At 0.25° (~27 km) even q3
+keeps major city cores at Bortle 7 — city-core Bortle is resolution-limited here,
+an observed result, not a value to tune away. This model.py estimator itself
+— a Walker-law city-light falloff computed from a curated set of major
 cities (`cities.py`) — remains the offline modeled fallback. The .npy is
 the deliberate seam; swap it and nothing else changes (see `grid.py`).
 

@@ -24,6 +24,7 @@ LP_MAX_IMPACT = 0.8
 # surface brightness: concentrated stars survive a bright sky; diffuse low
 # surface-brightness objects do not.
 _SENSITIVITY_BY_KIND: dict[str, float] = {
+    "planet": 0.0,
     "open cluster": 0.15,
     "globular cluster": 0.25,
     "planetary nebula": 0.30,

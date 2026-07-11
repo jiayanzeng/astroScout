@@ -34,7 +34,7 @@ def _observer(lat: float, lon: float) -> Observer:
     return Observer(location=EarthLocation(lat=lat * u.deg, lon=lon * u.deg, height=0 * u.m))
 
 
-def _coord(obj: CatalogObject) -> SkyCoord:
+def _fixed_coord(obj: CatalogObject) -> SkyCoord:
     return SkyCoord(ra=obj.ra_hours * u.hourangle, dec=obj.dec_deg * u.deg)
 
 
@@ -93,7 +93,10 @@ def conditions_for(
     times = _grid(window)
     frame = AltAz(obstime=times, location=location)
 
-    target_altaz = _coord(obj).transform_to(frame)
+    # Moving bodies use Astropy's built-in solar-system ephemeris. This is
+    # planning-grade rather than precision astrometry, and requires no network.
+    target_coord = _fixed_coord(obj) if obj.body is None else get_body(obj.body, times, location)
+    target_altaz = target_coord.transform_to(frame)
     alts = target_altaz.alt.deg
 
     # Hours above the useful-altitude floor during darkness.
@@ -104,7 +107,10 @@ def conditions_for(
     # Moon separation at the moment the target peaks (worst-case-ish, simple).
     peak_idx = int(np.argmax(alts))
     moon = get_body("moon", times[peak_idx], location)
-    sep = float(moon.separation(_coord(obj)).deg)
+    target_at_peak = (
+        target_coord if obj.body is None else get_body(obj.body, times[peak_idx], location)
+    )
+    sep = float(moon.separation(target_at_peak).deg)
 
     return TargetConditions(
         altitude_deg=round(peak_alt, 1),

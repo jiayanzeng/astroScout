@@ -86,8 +86,8 @@ astroscout/
 │       │   ├── grid.py                #   build_grid / load_grid (mmap) / bortle_at  O(1)
 │       │   └── bortle_grid.npy        #   COMMITTED uint8 grid (720×1440, 0.25°, ~1MB) — World Atlas 2015 q3
 │       ├── datasources/
-│       │   ├── dso_catalog.py         # 15 DSOs: CatalogObject(name,ra_hours,dec_deg,kind,common_name)
-│       │   ├── planning.py            # dark_window, conditions_for, rank_targets, target_detail, parse_when ★core
+│       │   ├── dso_catalog.py         # 15 fixed DSOs + Jupiter/Saturn/Mars/Venus (moving bodies)
+│       │   ├── planning.py            # dark window + fixed/moving-body visibility/ranking ★core
 │       │   ├── visibility.py          # get_visibility (Simbad), get_darkness
 │       │   ├── catalog.py             # resolve_object via Simbad/astroquery
 │       │   └── literature.py          # resolve_object_query (ADS object svc → Solr fields),
@@ -104,7 +104,7 @@ astroscout/
 │           ├── visibility.py          # GET /visibility?target=&lat=&lon=   (Lat/Lon validated)
 │           └── planning.py            # GET /plan/night, /plan/target  (Lat/Lon/When)
 │   └── tests/                         # see §4 for what's CI vs integration
-│       ├── test_scoring.py            # scoring + light-pollution (incl. ranking-flip)  [13]
+│       ├── test_scoring.py            # scoring + light-pollution (incl. planet neutrality)  [14]
 │       ├── test_bortle.py             # model, grid index math, bortle_at sanity  [6]
 │       ├── test_parse_when.py         # date/datetime parsing  [4]
 │       ├── test_routers.py            # 422 validation (CI, 5) + future-date (integration, 2)
@@ -200,6 +200,8 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    sensitivity) barely move; faint galaxies (high sensitivity) are crushed in cities —
    so **rankings flip between a dark site and a city**. This is the defining behaviour;
    preserve it. Bortle is a **location property** (computed once per plan), not per-target.
+   Planets have `light_sensitivity=0.0`: their high surface brightness makes the modeled
+   light-pollution factor neutral even at Bortle 9.
 5. **Validate before astropy.** Shared `Lat`/`Lon` `Annotated` query params (`params.py`)
    enforce bounds (±90 / ±180) on BOTH planning and visibility routers → 422 before any
    astropy call. `when` parse errors → 422; downstream failures → 502.
@@ -229,7 +231,7 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 ### `scoring.py` (pure)
 - Constants: `MIN_USEFUL_ALT=20.0`, `GOOD_ALT=40.0`, `BRIGHT_MOON=0.7`,
   `CLOSE_MOON_DEG=30.0`, **`LP_MAX_IMPACT=0.8`**.
-- `_SENSITIVITY_BY_KIND` (0=robust … 1=fragile): open cluster `0.15`, globular `0.25`,
+- `_SENSITIVITY_BY_KIND` (0=robust … 1=fragile): planet `0.0`, open cluster `0.15`, globular `0.25`,
   planetary nebula `0.30`, emission nebula / nebula `0.55`, galaxy `0.90`, dark nebula
   `1.00`; `DEFAULT_SENSITIVITY=0.55`.
 - `@dataclass(frozen=True) TargetConditions(altitude_deg, moon_illumination,
@@ -299,14 +301,24 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
   ≤100 chars and trailing whitespace stripped; behavior unchanged (same base-URL
   fallback, no logic touched).
 
+### `datasources/dso_catalog.py`
+- `CatalogObject(name,ra_hours,dec_deg,kind,common_name,body=None)`. Fixed targets use
+  J2000 RA/Dec; a non-null `body` is an Astropy solar-system body name and makes those
+  coordinate fields unused placeholders.
+- `CATALOG` now has 19 rows: the original 15 DSOs plus Jupiter, Saturn, Mars, and Venus,
+  all with `kind="planet"` and lowercase body identifiers. `get(name)` remains
+  case-insensitive and resolves the new planet names locally before any Simbad fallback.
+
 ### `datasources/planning.py`
 - `parse_when(str|None)->Time|None`: None/empty→None; date-only → append `T12:00:00`
   (UTC, biases to upcoming evening); full datetime passthrough; bad → `ValueError`.
 - `dark_window(lat,lon,when=None)` → astronomical dusk→dawn + moon illumination.
 - `conditions_for(obj,lat,lon,window,bortle)` → samples altitude over the night
-  (20-min grid), peak alt + hours-above-floor + moon sep at peak; sets `bortle` and
-  `light_sensitivity_for_kind(obj.kind)`.
-- `rank_targets(lat,lon,when=None)` → `{dusk_utc, dawn_utc, dark_hours,
+  (20-min grid), peak alt + hours-above-floor + moon sep at peak. Fixed targets use
+  J2000 coordinates; moving bodies use `get_body` across the time grid and again at
+  peak for moon separation. Astropy's built-in ephemeris is planning-grade, not
+  precision astrometry, and needs no network. Sets `bortle` and kind sensitivity.
+- `rank_targets(lat,lon,when=None)` ranks all 19 local targets → `{dusk_utc, dawn_utc, dark_hours,
   moon_illumination, bortle, targets:[{name, common_name, kind, score, rating,
   peak_altitude_deg, hours_visible, moon_separation_deg, light_sensitivity}]}` sorted by score.
 - `target_detail(name,lat,lon,when=None)` → same row + dark_hours/moon/bortle; falls back
@@ -407,11 +419,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API last verified 2026-07-10: **42 unit
-  tests pass** (34 @ v0.6 + 6 ADS-resolver + 2 config-anchoring from Task 1), 10
-  deselected as integration; `ruff check`, `ruff format --check`, and `mypy src` all
-  clean — the 2026-07-02 relay-patch lint regression in `rag/embeddings.py` is fixed
-  (§5 item 0). Current web source passes typecheck, lint, the unchanged offline retrieval
+- **Current status:** API verified 2026-07-11: **43 unit tests pass**, 11 deselected as
+  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The added
+  pure test proves planet sensitivity is `0.0` and Bortle 9 is neutral; the Jupiter
+  built-in-ephemeris check is integration-gated. Current web source passes typecheck, lint, the unchanged offline retrieval
   table, and the 12-route production build. No-key Vitest: **40 passed + 6 live
   faithfulness cases skipped**. Live B3 gate: **6/6 passed** through `OpenAIJudge`.
   The B2 live A/B is recorded above (§5 item 6).
@@ -465,7 +476,7 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–7 are done; item 8 remains open:
+**CI is green.** Items 0–8 are done; no item in this handoff list remains open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -527,8 +538,15 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
    predated B2). Measured live result through the configured relay: **6/6 pass**. The
    fixture is canned and sends no retrieved corpus or user data. Typecheck, lint, and the
    12-route production build remain green; `MockJudge` stays the offline path.
-8. **Planets / non-DSO targets.** Catalog is DSO-only; planets (high surface brightness,
-   ~0 light sensitivity) aren't modelled. If added, give them `light_sensitivity ≈ 0`.
+8. ✅ **Planets / non-DSO targets (Done 2026-07-11).** Added Jupiter, Saturn, Mars,
+   and Venus to the local catalog with `body` identifiers; fixed objects retain J2000
+   RA/Dec, while planets use Astropy `get_body` over the night and at peak moon
+   separation. The built-in ephemeris is explicitly planning-grade. `planet` sensitivity
+   is exactly `0.0`, so the light-pollution factor stays `1.0` at Bortle 9. A pure CI test
+   covers that invariant; an integration-gated Jupiter-at-opposition test covers moving
+   coordinates. No web change was needed: existing rows already render kind `planet` with
+   the robust LP badge. Full API gate: Ruff lint/format and mypy clean; 43 passed / 11
+   deselected.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`
