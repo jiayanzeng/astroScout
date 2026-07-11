@@ -78,6 +78,7 @@ astroscout/
 │       ├── config.py                  # Settings: ads_token, openai_api_key, openai_base_url,
 │       │                              #   supabase_url, supabase_service_key, cors_origins_raw
 │       │                              #   env_file anchored to repo root (§4 quirks)
+│       ├── budget.py                  # PURE integration-time ranges + visible assumptions
 │       ├── params.py                  # shared Annotated query types: Lat, Lon, When
 │       ├── scoring.py                 # PURE scorer + light-pollution linkage  ★core
 │       ├── bortle/                    # OFFLINE light-pollution lookup  ★core (v0.6)
@@ -106,6 +107,7 @@ astroscout/
 │           ├── visibility.py          # GET /visibility?target=&lat=&lon=   (Lat/Lon validated)
 │           └── planning.py            # GET /plan/night, /plan/target  (Lat/Lon/When)
 │   └── tests/                         # see §4 for what's CI vs integration
+│       ├── test_budget.py             # pure budget identities, clamps, filters, ranges  [13]
 │       ├── test_scoring.py            # scoring + light-pollution (incl. planet neutrality)  [14]
 │       ├── test_bortle.py             # model, Bortle/SQM grid math + calibration  [11]
 │       ├── test_parse_when.py         # date/datetime parsing  [4]
@@ -248,6 +250,46 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
   `moon_term=max(0, 1 − illum·max(0,1−sep/90))`; returns `round(base · LP_factor, 1)`.
 - `rate_target(altitude_deg, moon_illumination)->str` UNCHANGED (3 buckets, alt+moon
   only). `rank(dict)->sorted list[(name,score)]`.
+
+### `budget.py` (pure integration-time range estimator)
+- The C-gate passed 2026-07-11: community feedback rejected false precision but engaged
+  with conditional hour/night baselines and the underlying sky, optics, filter, and noise
+  variables. Evidence links and the approved implementation contract are recorded in
+  `docs/plans/2026-07-11-c1-budget-estimator.md`.
+- Outputs are community-anchored **ranges**, not radiometric truth. `HoursEstimate`
+  exposes `low/high`, the resolved `sky_sqm` and source, LP/optics/tier multipliers, and
+  `filter_mismatch`. Planets return `None` because lucky imaging is outside this model.
+- `REF_SQM=21.5`, `REF_F_RATIO=5.0`, `SNR_TIME_BASE=2.512`, SQM clamps to `[10,25]`,
+  f-ratio clamps to `[1,32]`, and showcase ranges use `2.5×`. Clean f/5 broadband base
+  ranges at the reference sky are open cluster 1–2 h, globular 1.5–3 h, planetary or
+  emission nebula 2–4 h, generic nebula 2–4 h, galaxy 4–8 h, dark nebula 6–12 h, and
+  unknown 2–4 h.
+- `lp_time_multiplier = 2.512 ** (max(0,21.5−sky_sqm) × coupling)`. Broadband coupling
+  is 1.0. Mono-NB is derived from the reconciled calibration anchor so Bortle 9 mono-NB
+  equals Bortle 4 broadband: `(21.5−21.0)/(21.5−15.5)=1/12`. Dual-NB remains `0.30`, a
+  **labelled unanchored interpolation** pending a community datapoint. Narrowband on a
+  non-emission kind falls back to broadband coupling and sets `filter_mismatch=True`.
+- `optics_time_multiplier=(clamp(f_ratio,1,32)/5)²`. `usable_hours` applies the scoring
+  moon-proximity shape with weights broadband 1.0, dual-NB 0.35, mono-NB 0.15 and clamps
+  out-of-range visibility/illumination/separation inputs.
+
+#### `budget.py` validation (community-reported datapoints)
+
+| source | target/kind | sky | gear/filter | community-reported | model output | verdict |
+|---|---|---|---|---|---|---|
+| CN 806760 | (ratio check) | SQM 20.6 vs 18.53 | broadband | 6.7x time ratio | `2.512**2.07 = 6.73x` | PASS (executable — test 1) |
+| CN 803525-adjacent | (ratio check) | same sky | f/8 vs f/4 | 4x time ratio | `optics: 4.0x` | PASS (executable — test 6) |
+| CN 806760 #17 | emission neb | B9 half-moon vs B4 moonless | 3nm Ha | “no discernible difference” | equal by construction (calibration anchor) | fill in |
+| CN 868697 | faint dust (Cocoon) | B8/9 | f/4 broadband | 17.5h “just starting to show dust” | fill in | fill in |
+| CN 868697 | typical target | B4 | f/4.5 broadband | ~6h acceptable minimum | fill in | fill in |
+
+The first two identities are measured executable checks; unmeasured cells remain `fill in`
+for human review. Class-midpoint estimates carry up to ±half-band uncertainty: Bortle 4
+alone spans 1.0 mag, about 2.5× time. The SQM sidecar/override avoids that discretization,
+though named-city readings remain resolution-limited at 0.25°. For row 3, colloquial
+“Bortle 9” likely means SQM around 17.5–18 rather than the open-ended class representative
+15.5. At SQM 18.0, derived mono-NB gives `1.31×` versus broadband-B4 `1.58×`—mono is
+slightly ahead, still consistent with “no discernible difference.”
 
 ### `bortle/` (offline, O(1))
 - `calibration.py` is the **single Bortle↔SQM authority**. It owns
@@ -448,7 +490,7 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-11: **48 unit tests pass**, 11 deselected as
+- **Current status:** API verified 2026-07-11: **61 unit tests pass**, 11 deselected as
   integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The added
   pure test proves planet sensitivity is `0.0` and Bortle 9 is neutral; the Jupiter
   built-in-ephemeris check is integration-gated. Current web source passes typecheck, lint, the unchanged offline retrieval
@@ -505,8 +547,9 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–8, Track W2 item 10, and Track C1a item 11 are done. Track W1
-item 9 is implemented and offline-green; its live acceptance step remains open:
+**CI is green.** Items 0–8, Track W2 item 10, Track C1a item 11, and Track C1 item 12 are
+done. Track W1 item 9 is implemented and offline-green; its live acceptance step remains
+open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -616,7 +659,7 @@ item 9 is implemented and offline-green; its live acceptance step remains open:
     imports that table, retains the same vectorized Bortle classification, and is ready to
     save a clipped float16 `(720,1440)` `sqm_grid.npy` while reporting SQM per sanity site
     and both artifacts. Runtime adds cached optional `load_sqm_grid` / `sqm_at` with the
-    same factored coordinate math as `bortle_at`; absence returns `None`. Four new CI tests
+    same factored coordinate math as `bortle_at`; absence returns `None`. Five new CI tests
     cover the crosswalk, missing fallback, float16 lookup, synthetic Bortle/SQM agreement,
     and the production sidecar artifact. Synthetic build conversion matched the previous
     formula exactly. The maintainer regenerated both production artifacts; the Bortle
@@ -630,6 +673,29 @@ item 9 is implemented and offline-green; its live acceptance step remains open:
     `17.703125/17.953125/18.0625/17.90625/17.90625`, with all five Bortle readings still
     7. Full gates are green: API Ruff/mypy plus **48 passed / 11 deselected**; web
     typecheck/ESLint, **44 passed + 6 skipped**, and the 12-route production build.
+12. ✅ **Track C1 — pure integration-time budget estimator (Done 2026-07-11).** The
+    community C-gate passed: users reject universal precision but engage with transparent
+    range estimates and their sky/gear assumptions. Added pure `budget.py` and 13 offline
+    tests covering the required SQM and optics identities, monotonicity, filter behavior,
+    lunar weighting, clamps/defaults, planet exclusion, source labels, and ordered ranges.
+    Executable validation measured the SQM ratio at **6.730396×**, f/8 versus f/4 at
+    **4.0×**, and the mono-NB B9 / broadband B4 anchor at the identical
+    **1.584929×** multiplier. The five-row human validation table is in §3; unknown cells
+    remain explicitly unfilled. Full gates are green: API Ruff/format/mypy clean with
+    **61 passed / 11 deselected**; web typecheck/ESLint and **44 passed + 6 skipped**, plus
+    a successful **12-route** production build. No dependencies, network, grid I/O, or
+    existing source modules changed.
+
+    **Correction note (2026-07-11):** Track C rev 2 reconciled the Bortle crosswalk but
+    left the old literal `mono_nb=0.12` coupling calibrated against pre-reconciliation
+    B9=17.5. That would miss its required acceptance band by 22.46%. Mono-NB coupling is
+    now derived as `(REF_SQM−BORTLE_TO_SQM[4])/(REF_SQM−BORTLE_TO_SQM[9]) = 1/12`, so
+    crosswalk and anchor cannot drift. The identity test validates derivation wiring; the
+    forum claim remains a human-reviewed physics datapoint.
+
+    **Follow-up — dual-NB calibration (open):** find a community datapoint that can anchor
+    `dual_nb`. Its current `0.30` is a labelled, unanchored interpolation and was not
+    silently rescaled when mono-NB was corrected.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`
