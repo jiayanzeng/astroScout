@@ -6,10 +6,25 @@ from astroscout_api.budget import (
     SNR_TIME_BASE,
     hours_needed,
     lp_time_multiplier,
+    nights_to_reach,
     optics_time_multiplier,
     sqm_for_bortle,
     usable_hours,
 )
+
+
+def test_nights_to_reach_empty_and_all_zero_horizons() -> None:
+    assert nights_to_reach([], 1.0) is None
+    assert nights_to_reach([0.0, 0.0, 0.0], 1.0) is None
+    assert nights_to_reach([0.0], 0.0) == 1
+
+
+def test_nights_to_reach_exact_boundary_is_one_based() -> None:
+    assert nights_to_reach([1.5, 2.5, 3.0], 4.0) == 2
+
+
+def test_nights_to_reach_returns_none_for_insufficient_horizon() -> None:
+    assert nights_to_reach([1.0, 2.0, 3.0], 6.1) is None
 
 
 def test_sqm_formula_identity_and_bortle_is_ignored_for_override() -> None:

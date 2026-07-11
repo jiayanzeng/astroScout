@@ -30,6 +30,27 @@ def test_plan_night_rejects_malformed_when() -> None:
     assert r.status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("override", "value"),
+    [
+        ("when", "not-a-date"),
+        ("nights", 0),
+        ("f_ratio", 0),
+        ("filter", "solar"),
+        ("sqm", 30),
+    ],
+)
+def test_plan_project_rejects_invalid_query_values(override: str, value: object) -> None:
+    params: dict[str, object] = {
+        "name": "M42",
+        "lat": -36.85,
+        "lon": 174.76,
+        "f_ratio": 5.0,
+    }
+    params[override] = value
+    assert client.get("/plan/project", params=params).status_code == 422
+
+
 # --- future-date planning end to end (astropy compute) ---
 @pytest.mark.integration
 def test_plan_night_future_date_returns_ranked_targets() -> None:

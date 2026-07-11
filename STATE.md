@@ -79,7 +79,7 @@ astroscout/
 │       │                              #   supabase_url, supabase_service_key, cors_origins_raw
 │       │                              #   env_file anchored to repo root (§4 quirks)
 │       ├── budget.py                  # PURE integration-time ranges + visible assumptions
-│       ├── params.py                  # shared Annotated query types: Lat, Lon, When
+│       ├── params.py                  # shared validated query types: coords/time/projection gear
 │       ├── scoring.py                 # PURE scorer + light-pollution linkage  ★core
 │       ├── bortle/                    # OFFLINE light-pollution lookup  ★core (v0.6)
 │       │   ├── calibration.py         #   PURE Bortle↔SQM single authority + midpoints
@@ -105,13 +105,13 @@ astroscout/
 │       └── routers/
 │           ├── health.py              # GET /health
 │           ├── visibility.py          # GET /visibility?target=&lat=&lon=   (Lat/Lon validated)
-│           └── planning.py            # GET /plan/night, /plan/target  (Lat/Lon/When)
+│           └── planning.py            # GET /plan/night, /plan/target, /plan/project
 │   └── tests/                         # see §4 for what's CI vs integration
-│       ├── test_budget.py             # pure budget identities, clamps, filters, ranges  [13]
+│       ├── test_budget.py             # pure budget identities, ranges, cumulative nights  [16]
 │       ├── test_scoring.py            # scoring + light-pollution (incl. planet neutrality)  [14]
 │       ├── test_bortle.py             # model, Bortle/SQM grid math + calibration  [11]
 │       ├── test_parse_when.py         # date/datetime parsing  [4]
-│       ├── test_routers.py            # 422 validation (CI, 5) + future-date (integration, 2)
+│       ├── test_routers.py            # 422 validation (CI, 10) + future-date (integration, 2)
 │       ├── test_chunking.py           # RAG chunker  [6]
 │       ├── test_literature.py         # ADS resolver translation + fallbacks (CI, 6)
 │       │                              #   + live round-trips (integration, 3)  ★(v0.6.1)
@@ -208,7 +208,9 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    light-pollution factor neutral even at Bortle 9.
 5. **Validate before astropy.** Shared `Lat`/`Lon` `Annotated` query params (`params.py`)
    enforce bounds (±90 / ±180) on BOTH planning and visibility routers → 422 before any
-   astropy call. `when` parse errors → 422; downstream failures → 502.
+   astropy call. Projection also validates f-ratio `(0,32]`, nights `[1,60]`, optional SQM
+   `[15,22.1]`, and filter/tier Literals before compute. `when` parse errors → 422;
+   downstream failures → 502.
 6. **Embedding model pinned on both sides.** Ingestion (Python) and retrieval (web) both
    use `text-embedding-3-small` (1536-d). A mismatch is a silent RAG bug — never diverge.
    Relay corollary (v0.6.1): if `OPENAI_BASE_URL` points at a relay, the relay must serve
@@ -272,6 +274,8 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 - `optics_time_multiplier=(clamp(f_ratio,1,32)/5)²`. `usable_hours` applies the scoring
   moon-proximity shape with weights broadband 1.0, dual-NB 0.35, mono-NB 0.15 and clamps
   out-of-range visibility/illumination/separation inputs.
+- `nights_to_reach(usable,goal)` accumulates chronological non-negative usable hours and
+  returns the 1-based finishing night, or `None` when the projection horizon is short.
 
 #### `budget.py` validation (community-reported datapoints)
 
@@ -377,12 +381,22 @@ slightly ahead, still consistent with “no discernible difference.”
   peak_altitude_deg, hours_visible, moon_separation_deg, light_sensitivity}]}` sorted by score.
 - `target_detail(name,lat,lon,when=None)` → same row + dark_hours/moon/bortle; falls back
   to `FixedTarget.from_name` (Simbad) for non-catalog names.
+- `_resolve_target` is the shared catalog-first/Simbad-fallback resolver used by detail and
+  projection. `project_target(...)` resolves Bortle once, prefers user SQM over the sidecar
+  over the Bortle-class crosswalk, records that source, and projects one conditions sample
+  per consecutive dusk (duplicate dusk windows are skipped). Each night exposes UTC
+  dusk/dawn, dark/visible/usable hours, and lunar conditions; the response also exposes
+  budget range, cumulative low/high finishing nights, horizon, and max-usable date.
+  Planets keep the nightly visibility list while budget fields remain null.
 
 ### Routers (`params.py` + `routers/*`)
 - `Lat=Annotated[float,Query(ge=-90,le=90)]`, `Lon=Annotated[float,Query(ge=-180,le=180)]`,
-  `When=Annotated[str|None,Query(...)]`.
+  `When=Annotated[str|None,Query(...)]`, plus bounded `FRatio`, `Nights`, and optional
+  measured `Sqm` projection parameters.
 - `GET /plan/night?lat&lon&when`, `GET /plan/target?name&lat&lon&when`,
-  `GET /visibility?target&lat&lon` (now validated), `GET /health`.
+  `GET /plan/project?name&lat&lon&f_ratio&filter&tier&when&nights&sqm`,
+  `GET /visibility?target&lat&lon` (now validated), `GET /health`. Projection defaults to
+  broadband, clean, 30 nights, and grid/class SQM; Literal and bound failures return 422.
 
 ### Web `lib`
 - `api.ts` types: `NightPlan` now includes **`bortle:number`** (and `RankedTarget`,
@@ -490,10 +504,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-11: **61 unit tests pass**, 11 deselected as
-  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The added
-  pure test proves planet sensitivity is `0.0` and Bortle 9 is neutral; the Jupiter
-  built-in-ephemeris check is integration-gated. Current web source passes typecheck, lint, the unchanged offline retrieval
+- **Current status:** API verified 2026-07-11: **69 unit tests pass**, 13 deselected as
+  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The two new
+  local-Astropy projection checks (M42 range and Jupiter no-budget behavior) also pass
+  when selected explicitly. Current web source passes typecheck, lint, the unchanged offline retrieval
   table, and the 12-route production build. No-key Vitest: **44 passed + 6 live
   faithfulness cases skipped**. Live B3 gate: **6/6 passed** through `OpenAIJudge`.
   The B2 live A/B is recorded above (§5 item 6).
@@ -547,9 +561,9 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–8, Track W2 item 10, Track C1a item 11, and Track C1 item 12 are
-done. Track W1 item 9 is implemented and offline-green; its live acceptance step remains
-open:
+**CI is green.** Items 0–8, Track W2 item 10, Track C1a item 11, Track C1 item 12, and
+Track C2 item 13 are done. Track W1 item 9 is implemented and offline-green; its live
+acceptance step remains open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -696,6 +710,17 @@ open:
     **Follow-up — dual-NB calibration (open):** find a community datapoint that can anchor
     `dual_nb`. Its current `0.30` is a labelled, unanchored interpolation and was not
     silently rescaled when mono-NB was corrected.
+
+13. ✅ **Track C2 — multi-night projection + `GET /plan/project` (Done
+    2026-07-11).** Added bounded f-ratio, horizon, and measured-SQM query types plus
+    filter/tier Literal validation. The planner now shares one catalog-first target
+    resolver, records user/grid/class sky provenance, projects consecutive unique dusk
+    windows, applies filter-aware lunar usable-hours penalties, and reports the estimated
+    range, cumulative finishing nights, and best night. Planets intentionally return
+    populated visibility nights with null long-integration budget fields. Pure cumulative
+    edge cases and all five required 422 cases run offline. API Ruff/format/mypy are clean
+    with **69 passed / 13 deselected**; both new local-Astropy integration cases pass
+    explicitly (**2 passed**). No dependencies or committed data changed.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`

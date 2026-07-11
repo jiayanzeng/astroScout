@@ -19,7 +19,14 @@ from astropy.coordinates import (
 )
 from astropy.time import Time, TimeDelta
 
-from ..bortle.grid import bortle_at
+from ..bortle.grid import bortle_at, sqm_at
+from ..budget import (
+    FilterKind,
+    QualityTier,
+    hours_needed,
+    nights_to_reach,
+    usable_hours,
+)
 from ..scoring import (
     MIN_USEFUL_ALT,
     TargetConditions,
@@ -136,6 +143,24 @@ def _row(obj: CatalogObject, c: TargetConditions) -> dict[str, object]:
     }
 
 
+def _resolve_target(name: str) -> CatalogObject:
+    """Resolve a catalog target locally, falling back to Simbad."""
+    obj = get(name)
+    if obj is not None:
+        return obj
+
+    from astroplan import FixedTarget
+
+    ft = FixedTarget.from_name(name)
+    return CatalogObject(
+        name=name,
+        ra_hours=float(ft.coord.ra.hour),
+        dec_deg=float(ft.coord.dec.deg),
+        kind="unknown",
+        common_name=name,
+    )
+
+
 def rank_targets(lat: float, lon: float, when: Time | None = None) -> dict[str, object]:
     """Rank the built-in catalog for the upcoming night at this location."""
     window = dark_window(lat, lon, when)
@@ -154,18 +179,7 @@ def rank_targets(lat: float, lon: float, when: Time | None = None) -> dict[str, 
 
 def target_detail(name: str, lat: float, lon: float, when: Time | None = None) -> dict[str, object]:
     """Full conditions for one target (catalog first, else Simbad)."""
-    obj = get(name)
-    if obj is None:
-        from astroplan import FixedTarget
-
-        ft = FixedTarget.from_name(name)
-        obj = CatalogObject(
-            name=name,
-            ra_hours=float(ft.coord.ra.hour),
-            dec_deg=float(ft.coord.dec.deg),
-            kind="unknown",
-            common_name=name,
-        )
+    obj = _resolve_target(name)
     window = dark_window(lat, lon, when)
     bortle = bortle_at(lat, lon)
     c = conditions_for(obj, lat, lon, window, bortle)
@@ -174,4 +188,100 @@ def target_detail(name: str, lat: float, lon: float, when: Time | None = None) -
         "dark_hours": round(window.hours, 1),
         "moon_illumination": round(window.moon_illumination, 2),
         "bortle": bortle,
+    }
+
+
+def project_target(
+    name: str,
+    lat: float,
+    lon: float,
+    f_ratio: float,
+    filter_kind: FilterKind,
+    tier: QualityTier,
+    when: Time | None = None,
+    nights: int = 30,
+    sqm: float | None = None,
+) -> dict[str, object]:
+    """Project one target over consecutive nights and estimate completion.
+
+    This performs one ``conditions_for`` calculation per night. The 30-night
+    default is roughly twice the cost of one ``rank_targets`` call; the router's
+    60-night validation bound limits that work.
+    """
+    obj = _resolve_target(name)
+    bortle = bortle_at(lat, lon)
+    sky_sqm: float | None
+    if sqm is not None:
+        sky_sqm = sqm
+        sky_source = "user"
+    else:
+        sky_sqm = sqm_at(lat, lon)
+        sky_source = "grid" if sky_sqm is not None else "bortle-class"
+    estimate = hours_needed(obj.kind, bortle, f_ratio, filter_kind, tier, sqm=sky_sqm)
+
+    anchor = when if when is not None else Time.now()
+    projected: list[dict[str, object]] = []
+    usable_by_night: list[float] = []
+    previous_dusk: Time | None = None
+    extra_days = 0
+
+    for night_index in range(nights):
+        night_anchor = anchor + TimeDelta((night_index + extra_days) * u.day)
+        window = dark_window(lat, lon, night_anchor)
+        if previous_dusk is not None and window.dusk == previous_dusk:
+            extra_days += 1
+            night_anchor = anchor + TimeDelta((night_index + extra_days) * u.day)
+            window = dark_window(lat, lon, night_anchor)
+
+        conditions = conditions_for(obj, lat, lon, window, bortle)
+        usable = usable_hours(
+            conditions.hours_visible,
+            conditions.moon_illumination,
+            conditions.moon_separation_deg,
+            filter_kind,
+        )
+        usable_by_night.append(usable)
+        projected.append(
+            {
+                "date": str(window.dusk.utc.isot)[:10],
+                "dusk_utc": str(window.dusk.utc.isot),
+                "dawn_utc": str(window.dawn.utc.isot),
+                "dark_hours": round(window.hours, 1),
+                "moon_illumination": conditions.moon_illumination,
+                "moon_separation_deg": conditions.moon_separation_deg,
+                "hours_visible": conditions.hours_visible,
+                "usable_hours": usable,
+            }
+        )
+        previous_dusk = window.dusk
+
+    best_index = max(range(len(usable_by_night)), key=usable_by_night.__getitem__)
+    best_night = projected[best_index]["date"]
+    budget_applicable = estimate is not None
+    return {
+        "target": obj.name,
+        "common_name": obj.common_name,
+        "kind": obj.kind,
+        "bortle": bortle,
+        "sky_sqm": sky_sqm,
+        "sky_source": sky_source,
+        "filter_kind": filter_kind,
+        "tier": tier,
+        "f_ratio": f_ratio,
+        "hours_needed": (
+            {"low": estimate.low, "high": estimate.high} if estimate is not None else None
+        ),
+        "filter_mismatch": estimate.filter_mismatch if estimate is not None else None,
+        "budget_applicable": budget_applicable,
+        "nights": projected,
+        "nights_to_finish": (
+            {
+                "low": nights_to_reach(usable_by_night, estimate.low),
+                "high": nights_to_reach(usable_by_night, estimate.high),
+            }
+            if estimate is not None
+            else None
+        ),
+        "horizon_nights": nights,
+        "best_night": best_night,
     }

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
 
-from ..datasources.planning import parse_when, rank_targets, target_detail
-from ..params import Lat, Lon, When
+from ..budget import FilterKind, QualityTier
+from ..datasources.planning import parse_when, project_target, rank_targets, target_detail
+from ..params import FRatio, Lat, Lon, Nights, Sqm, When
 
 router = APIRouter(prefix="/plan", tags=["planning"])
 
@@ -31,5 +32,28 @@ def plan_target(name: str, lat: Lat, lon: Lon, when: When = None) -> dict[str, o
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         return target_detail(name, lat, lon, parsed)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+@router.get("/project")
+def plan_project(
+    name: str,
+    lat: Lat,
+    lon: Lon,
+    f_ratio: FRatio,
+    filter: FilterKind = "broadband",
+    tier: QualityTier = "clean",
+    when: When = None,
+    nights: Nights = 30,
+    sqm: Sqm = None,
+) -> dict[str, object]:
+    """Project one target across a bounded multi-night horizon."""
+    try:
+        parsed = parse_when(when)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return project_target(name, lat, lon, f_ratio, filter, tier, parsed, nights, sqm)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc

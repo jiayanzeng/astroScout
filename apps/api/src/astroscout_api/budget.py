@@ -119,6 +119,20 @@ def usable_hours(
     return round(visible * max(0.0, 1.0 - penalty), 1)
 
 
+def nights_to_reach(usable: list[float], goal: float) -> int | None:
+    """Return the 1-based night count that reaches a cumulative-hours goal."""
+    if not usable:
+        return None
+    if goal <= 0.0:
+        return 1
+    total = 0.0
+    for night, hours in enumerate(usable, start=1):
+        total += max(0.0, hours)
+        if total >= goal:
+            return night
+    return None
+
+
 def hours_needed(
     kind: str,
     bortle: int,
