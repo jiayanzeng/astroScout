@@ -3,7 +3,7 @@
  *
  *   pnpm --filter @astroscout/web eval     # offline: sparse vs dense vs hybrid
  *   OPENAI_API_KEY=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
- *     pnpm --filter @astroscout/web eval   # live: pgvector-hybrid vs pgvector-hybrid+rerank
+ *     pnpm --filter @astroscout/web eval   # live: raw hybrid vs LLM vs BGE rerank
  *
  * Writes evals/report.json. Optionally forwards to Braintrust when BRAINTRUST_API_KEY is set.
  */
@@ -15,6 +15,7 @@ import {
   DenseRetriever,
   HybridRetriever,
   LexicalRetriever,
+  LiveCandidateCache,
   LiveRetriever,
   type Retriever,
 } from "./retriever";
@@ -72,20 +73,28 @@ function row(name: string, a: ReturnType<typeof agg>): string {
 }
 
 async function main(): Promise<void> {
-  const live =
+  const live = Boolean(
     process.env.OPENAI_API_KEY &&
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  );
 
   const sparse = new LexicalRetriever();
-  const dense: Retriever = live ? new LiveRetriever(true) : new DenseRetriever();
+  const dense = new DenseRetriever();
   const hybrid = new HybridRetriever(sparse, dense);
+  const liveCandidates = new LiveCandidateCache();
   const retrievers: Retriever[] = live
-    ? [new LiveRetriever(false), dense]
+    ? [
+        new LiveRetriever(false, liveCandidates),
+        new LiveRetriever("llm", liveCandidates),
+        new LiveRetriever("bge", liveCandidates),
+      ]
     : [sparse, dense, hybrid, new RerankedRetriever(hybrid, new LexicalReranker())];
 
   const exact = RETRIEVAL_DATASET.filter((c) => c.kind === "exact");
   const semantic = RETRIEVAL_DATASET.filter((c) => c.kind === "semantic");
+  const exactIds = new Set(exact.map((c) => c.id));
+  const semanticIds = new Set(semantic.map((c) => c.id));
 
   const report: Record<string, unknown> = { mode: live ? "live" : "offline", retrievers: [] };
   const retrieverReports: { name: string; results: CaseResult[] }[] = [];
@@ -95,8 +104,8 @@ async function main(): Promise<void> {
   console.log("─".repeat(64));
   for (const r of retrievers) {
     const all = await evalRetriever(r, RETRIEVAL_DATASET);
-    const ex = await evalRetriever(r, exact);
-    const se = await evalRetriever(r, semantic);
+    const ex = all.filter((result) => exactIds.has(result.id));
+    const se = all.filter((result) => semanticIds.has(result.id));
     console.log(row(r.name + " [all]", agg(all)));
     console.log(row("  ├ exact queries", agg(ex)));
     console.log(row("  └ semantic queries", agg(se)));
@@ -107,8 +116,8 @@ async function main(): Promise<void> {
   report.retrievers = retrieverReports.map(({ name, results }) => ({
     name,
     aggregate: agg(results),
-    aggregate_exact: agg(results.filter((r) => exact.some((e) => e.id === r.id))),
-    aggregate_semantic: agg(results.filter((r) => semantic.some((s) => s.id === r.id))),
+    aggregate_exact: agg(results.filter((result) => exactIds.has(result.id))),
+    aggregate_semantic: agg(results.filter((result) => semanticIds.has(result.id))),
   }));
 
   writeFileSync(

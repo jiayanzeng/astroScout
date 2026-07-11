@@ -10,8 +10,11 @@ A self-contained harness for measuring the copilot's **retrieval quality** and
 pnpm --filter @astroscout/web eval
 
 # live: the real pgvector retrieval used by the copilot
-OPENAI_API_KEY=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
-  pnpm --filter @astroscout/web eval
+# Opt-in local install; this updates manifests, so do not commit it unless policy changes.
+pnpm --filter @astroscout/web add -D @huggingface/transformers
+cd apps/web
+# Load the existing ignored local env file, then let Node's tsx loader run TypeScript.
+node --env-file=.env.local --import tsx evals/run.ts
 ```
 
 It prints a per-case table + aggregate and writes `evals/report.json`. The pure
@@ -30,7 +33,7 @@ metric and faithfulness-aggregation functions are unit-tested and run in CI
 
 ## What the harness shows (offline run)
 
-It compares three retrievers on the same dataset, split by query type:
+It compares four retrieval variants on the same dataset, split by query type:
 
 ```
 retriever                        recall@3  MRR  nDCG@5
@@ -53,13 +56,20 @@ Two findings, both honest:
    **true cross-encoder** that jointly attends to query and passage — a fundamentally
    different signal a deterministic stand-in can't fake.
 
-Production therefore uses a real cross-encoder: **Cohere Rerank** (`COHERE_API_KEY`) or an
-**LLM scorer** (`OPENAI_API_KEY`), in `src/lib/rerank.ts` — `searchKnowledge` retrieves 15
-hybrid candidates then reranks to the top 5. Offline, the "dense" side and the reranker are
-deterministic stand-ins so the run needs no keys; run with keys to measure the live
-cross-encoder lift over hybrid.
+Production can therefore use a stronger second stage: **Cohere Rerank**
+(`COHERE_API_KEY`), an **LLM scorer** (`OPENAI_API_KEY`), or the explicitly selected local
+**BAAI bge-reranker-base** ONNX conversion (`RERANK_BACKEND=bge`) in
+`src/lib/rerank.ts`. `searchKnowledge` retrieves 15 hybrid candidates, removes
+near-duplicate chunks within each `(target, bibcode)` group, then reranks to the top 5.
+With no explicit backend, the production dispatch remains Cohere -> LLM -> pass-through.
 
-## Live run (real pgvector + reranker, 2026-07-09)
+The BGE runtime is deliberately opt-in: install `@huggingface/transformers` as a local dev
+package before selecting it. The package is dynamically imported and the model is loaded
+only on the first BGE request, so offline tests and `next build` do not require it. Inference
+is local/no-vendor after the model is present, but first use downloads and caches roughly
+300 MB of public model/tokenizer artifacts from Hugging Face.
+
+## Historical live run (real pgvector + LLM reranker, 2026-07-09)
 
 With 203 passage chunks ingested over 15 targets and the LLM reranker (gpt-4o-mini):
 
@@ -77,6 +87,28 @@ showed that a weak reranker regresses). Cohere not tested (no key).
 Note: live recall@3 is lower than offline (0.57 vs 0.88) because the real pgvector
 embeddings retrieve from actual cited literature — the passages are about the right
 targets but don't always match the curated blurb-based query phrasing the dataset uses.
+
+## Task B2 post-dedup LLM vs BGE A/B (2026-07-11)
+
+The harness now runs raw pgvector hybrid, an explicitly forced LLM reranker, and an
+explicitly forced BGE reranker in one live invocation. The LLM and BGE arms receive the
+same cached first-stage candidate snapshot and deterministic dedup result, and each arm is
+evaluated once so stochastic subgroup rows cannot diverge from the recorded aggregate.
+
+With the same 203-chunk, 15-target live corpus:
+
+```
+retriever                              recall@3  MRR  nDCG@5  reranker
+pgvector-hybrid(live)                  0.36      0.43  0.45    —
+pgvector-hybrid+llm-rerank(live)       0.61      0.58  0.61    llm (gpt-4o-mini)
+pgvector-hybrid+bge-rerank(live)       0.55      0.38  0.42    bge-reranker-base (q8)
+```
+
+**BGE regresses versus the LLM reranker on all required metrics:** recall@3 is about
+5.5 percentage points lower, MRR about 0.20 lower, and nDCG@5 about 0.19 lower. BGE does
+raise recall@3 above raw hybrid, but its MRR and nDCG@5 fall below even the raw baseline.
+Per the eval-driven adoption rule, BGE stays explicitly opt-in and the production
+Cohere -> LLM -> pass-through default remains unchanged.
 
 ## Extending
 

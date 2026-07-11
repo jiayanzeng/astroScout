@@ -113,18 +113,63 @@ export class HybridRetriever implements Retriever {
   }
 }
 
-/** Live retriever: the real pgvector hybrid path; rerank flag controls whether
- *  rerankPassages is applied. Needs keys. */
+export type LiveRerankBackend = "llm" | "bge";
+
+export interface LiveCandidateSource {
+  retrieve(query: string): Promise<KnowledgePassage[]>;
+}
+
+/** One first-stage snapshot per query, shared by every live A/B arm. */
+export class LiveCandidateCache implements LiveCandidateSource {
+  private readonly byQuery = new Map<string, Promise<KnowledgePassage[]>>();
+
+  async retrieve(query: string): Promise<KnowledgePassage[]> {
+    const existing = this.byQuery.get(query);
+    if (existing) return existing;
+
+    const pending = import("../src/lib/knowledge").then(({ retrieveKnowledgeCandidates }) =>
+      retrieveKnowledgeCandidates(query),
+    );
+    this.byQuery.set(query, pending);
+    try {
+      return await pending;
+    } catch (error) {
+      this.byQuery.delete(query);
+      throw error;
+    }
+  }
+}
+
+/** Live retriever: the real pgvector hybrid path, either raw or with an explicitly
+ *  selected reranker. Needs live OpenAI and Supabase keys. */
 export class LiveRetriever implements Retriever {
   readonly name: string;
-  constructor(private readonly rerank = true) {
-    this.name = this.rerank
-      ? "pgvector-hybrid+rerank(live)"
-      : "pgvector-hybrid(live)";
+  constructor(
+    private readonly rerankBackend: LiveRerankBackend | false,
+    private readonly candidates: LiveCandidateSource = new LiveCandidateCache(),
+  ) {
+    this.name =
+      this.rerankBackend === false
+        ? "pgvector-hybrid(live)"
+        : `pgvector-hybrid+${this.rerankBackend}-rerank(live)`;
   }
   async retrieve(query: string, k: number): Promise<RetrievedPassage[]> {
-    const { searchKnowledge } = await import("../src/lib/knowledge");
-    const passages = await searchKnowledge(query, undefined, { rerank: this.rerank });
+    const candidates = await this.candidates.retrieve(query);
+    let passages: KnowledgePassage[];
+    if (this.rerankBackend === false) {
+      passages = candidates.slice(0, k);
+    } else {
+      const [{ deduplicatePassages }, { rerankPassages }] = await Promise.all([
+        import("../src/lib/knowledge"),
+        import("../src/lib/rerank"),
+      ]);
+      passages = await rerankPassages(
+        query,
+        deduplicatePassages(candidates),
+        k,
+        this.rerankBackend,
+      );
+    }
     return passages
       .slice(0, k)
       .map((p) => ({ target: p.target, content: p.content, similarity: p.similarity }));

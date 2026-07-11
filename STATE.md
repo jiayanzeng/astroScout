@@ -6,8 +6,9 @@ worth observing/imaging — accounting for altitude, the dark window, the moon, 
 local light pollution** — lets users save sessions and log observations, and answers
 astronomy questions via an AI copilot grounded in a cited literature corpus (hybrid
 RAG + cross-encoder rerank). Everything here is built and tested; you supply ADS /
-OpenAI / Supabase (+ optional Cohere) keys to run it live. OpenAI calls can be routed
-through any OpenAI-compatible relay via `OPENAI_BASE_URL` (v0.6.1).
+OpenAI / Supabase (+ optional Cohere) keys to run it live. An opt-in local BGE ONNX
+reranker is also implemented. OpenAI calls can be routed through any OpenAI-compatible
+relay via `OPENAI_BASE_URL` (v0.6.1).
 
 This document is the source of truth for a fresh session. Read it fully before editing.
 
@@ -32,7 +33,8 @@ see §5.
   shadcn/ui + **Vercel AI SDK v6** + **TypeScript 6**. Package name `@astroscout/web`.
 - **Data**: **Supabase** — auth (email magic link), Postgres + **pgvector**, RLS.
 - **AI**: OpenAI (`gpt-4o-mini` chat + `text-embedding-3-small` embeddings); optional
-  **Cohere Rerank** cross-encoder. Any OpenAI-compatible relay works via
+  **Cohere Rerank** or local BAAI **bge-reranker-base** ONNX cross-encoder. Any
+  OpenAI-compatible relay works via
   `OPENAI_BASE_URL`: the API reads it from `Settings`, the web reads it natively —
   `@ai-sdk/openai` v3 falls back to the `OPENAI_BASE_URL` env var (verified in the
   package source), so the web side needs **no code change**.
@@ -130,10 +132,10 @@ astroscout/
 │       ├── components/ui/             # button, input, card, badge (shadcn new-york)
 │       └── lib/
 │           ├── api.ts                 # types Visibility/RankedTarget/NightPlan/TargetDetail + fetchers ★
-│           ├── knowledge.ts           # searchKnowledge: embed → hybrid_search(15) → rerank(5) ★
-│           ├── rerank.ts              # CohereReranker / LLMReranker / rerankPassages ★
+│           ├── knowledge.ts           # hybrid_search(15) → per-document dedup → rerank(5) ★
+│           ├── rerank.ts              # Cohere / LLM / lazy local BGE backends ★
 │           ├── ai.ts                  # tools planNight/getTargetDetail/searchKnowledge; ChatMessage type ★
-│           ├── format.ts (+__tests__), utils.ts (cn)
+│           ├── format.ts, utils.ts + __tests__/{format,knowledge,rerank}.test.ts
 │           └── supabase/{client,server,types}.ts
 │   └── evals/                         # eval harness (offline-runnable)  ★
 │       ├── metrics.ts (+test)         # hit@k, precision@k, recall@k, MRR, nDCG, uniqueInOrder
@@ -141,10 +143,8 @@ astroscout/
 │       ├── faithfulness.ts (+test)    # claim split + score; MockJudge; judge-openai.ts (OpenAIJudge)
 │       ├── text.ts                    # tokens/stem/tf/cosineSparse
 │       ├── retriever.ts               # Lexical / Dense / Hybrid / Live retrievers
-│       │                              #   NOTE: LiveRetriever has a constructor flag producing
-│       │                              #   pgvector-hybrid(live) (no rerank) and
-│       │                              #   pgvector-hybrid+rerank(live) variants;
-│       │                              #   searchKnowledge accepts {rerank?: boolean}
+│       │                              #   variants: raw hybrid, explicit LLM, explicit BGE
+│       │                              #   searchKnowledge accepts rerank + backend overrides
 │       ├── rerank.ts (+test)          # LexicalReranker, RerankedRetriever
 │       ├── dataset.ts                 # 8 exact + 6 semantic labelled cases
 │       ├── run.ts                     # comparison runner (writes report.json; gitignored)
@@ -192,7 +192,8 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 3. **Eval-driven decisions.** Retrieval architecture was *chosen by measurement*:
    hybrid (RRF of full-text + vector) beat pure vector on recall@3/nDCG and is the prod
    path; a naive reranker was *rejected* by the harness. New retrieval changes should be
-   A/B'd in `evals/run.ts` before adoption.
+   A/B'd in `evals/run.ts` before adoption. The local BGE backend regressed against the
+   LLM reranker in its post-dedup live A/B, so it remains opt-in (§5 item 6).
 4. **Light-pollution = multiplicative damping by surface brightness.**
    `score × (1 − LP_MAX_IMPACT·((bortle−1)/8)·light_sensitivity)`. Clusters (low
    sensitivity) barely move; faint galaxies (high sensitivity) are crushed in cities —
@@ -319,14 +320,19 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 ### Web `lib`
 - `api.ts` types: `NightPlan` now includes **`bortle:number`** (and `RankedTarget`,
   `TargetDetail`, `Visibility`). `fetchVisibility/fetchNightPlan/fetchTargetDetail`.
-- `knowledge.ts` `searchKnowledge(query,target?,opts?: {rerank?: boolean})`: embed
-  (1536) → `supabase.rpc("hybrid_search", {query_text, query_embedding,
-  match_count:15, filter_target})`. When `opts.rerank === false` returns top-5 hybrid
-  candidates directly (RPC similarity scores); otherwise →
-  `rerankPassages(query, candidates, 5)`. `KnowledgePassage` has `target,title,source,
-  bibcode,url,content,similarity`.
-- `rerank.ts`: `rerankPassages` dispatches **Cohere** (if `COHERE_API_KEY`) → **LLM**
-  (if `OPENAI_API_KEY`) → pass-through.
+- `knowledge.ts` `searchKnowledge(query,target?,opts?)`: embed (1536) →
+  `supabase.rpc("hybrid_search", {query_text, query_embedding, match_count:15,
+  filter_target})`. `rerank:false` still returns the raw top-5 RPC candidates. The
+  rerank path first applies pure `deduplicatePassages`: group by `(target,bibcode)`,
+  normalize Unicode/case/punctuation/whitespace, and drop exact, token-boundary-prefix,
+  or conservative trigram near-matches behind the higher-similarity sibling. Survivors
+  retain their original objects/order; response shape is unchanged. An internal
+  `rerankBackend` override lets the harness force a fair LLM/BGE comparison.
+- `rerank.ts`: unset `RERANK_BACKEND` preserves **Cohere** (if `COHERE_API_KEY`) →
+  **LLM** (if `OPENAI_API_KEY`) → pass-through. `RERANK_BACKEND=bge` explicitly selects
+  `BgeReranker`, which dynamically imports the optional `@huggingface/transformers`
+  package and lazy-loads/caches the quantized `Xenova/bge-reranker-base` ONNX conversion
+  of BAAI's model. First use downloads about 300 MB unless cached; inference is local.
 - `ai.ts`: tools `planNight`, `getTargetDetail`, `searchKnowledge`; typed `ChatMessage =
   UIMessage<never,UIDataTypes,InferUITools<typeof tools>>`. Chat route uses
   `await convertToModelMessages(...)` (v6 is async), `stopWhen: stepCountIs(6)`,
@@ -355,13 +361,28 @@ hybrid (RRF)                 0.88      0.86  0.88   ← best first stage; prod p
 hybrid -> rerank(lexical)    0.80      0.84  0.84   ← regresses (bag-of-words ≈ dense)
 ```
 
-### Live corpus numbers (pgvector hybrid, 203 chunks over 15 targets, 2026-07-09)
+### Historical live corpus numbers (pgvector hybrid, 203 chunks over 15 targets, 2026-07-09)
 ```
 retriever                         recall@3  MRR  nDCG@5  reranker
 pgvector-hybrid(live)             0.36      0.43  0.45    —
 pgvector-hybrid+rerank(live)      0.57      0.57  0.61    llm (gpt-4o-mini)
 ```
 Rerank lifts. Cohere not tested (no key).
+
+### Task B2 post-dedup LLM vs BGE A/B (203 chunks, 15 targets, 2026-07-11)
+```
+retriever                              recall@3  MRR  nDCG@5  reranker
+pgvector-hybrid(live)                  0.36      0.43  0.45    —
+pgvector-hybrid+llm-rerank(live)       0.61      0.58  0.61    llm (gpt-4o-mini)
+pgvector-hybrid+bge-rerank(live)       0.55      0.38  0.42    bge-reranker-base (q8)
+```
+The harness now compares raw hybrid, explicitly forced LLM rerank, and explicitly forced
+BGE rerank in one run. A per-query cache gives both rerank arms the same first-stage
+candidate snapshot and deterministic dedup result, and each variant is evaluated once.
+**BGE regresses versus the LLM reranker on all required metrics:** recall@3 is lower by
+about 5.5 percentage points, MRR by about 0.20, and nDCG@5 by about 0.19. It improves raw
+hybrid recall@3 but falls below raw hybrid on MRR and nDCG@5. Per rule 3, BGE remains an
+explicit opt-in and the production Cohere → LLM → pass-through default is unchanged.
 
 ---
 
@@ -372,12 +393,13 @@ Rerank lifts. Cohere not tested (no key).
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status (verified 2026-07-10, fresh env): CI is green.** API **42 unit
+- **Current status:** API last verified 2026-07-10: **42 unit
   tests pass** (34 @ v0.6 + 6 ADS-resolver + 2 config-anchoring from Task 1), 10
   deselected as integration; `ruff check`, `ruff format --check`, and `mypy src` all
   clean — the 2026-07-02 relay-patch lint regression in `rag/embeddings.py` is fixed
-  (§5 item 0). Web (Tasks 3a/4 landed): **32 tests** (metrics 12, faithfulness 7,
-  fusion 4, rerank 3, format 6) + typecheck + lint + build (12 routes).
+  (§5 item 0). Current Task B2 web source passes **40 tests** (prior 32 + 6 passage
+  dedup + 2 local-BGE unit tests), typecheck, lint, the unchanged offline eval table,
+  and the 12-route production build. The live A/B is recorded above (§5 item 6).
 - **How to verify locally**:
   - API: from `apps/api`, `PYTHONPATH=src python -m pytest -m "not integration"`, plus
     `ruff check .`, `ruff format --check .`, `mypy src`.
@@ -428,9 +450,7 @@ Rerank lifts. Cohere not tested (no key).
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0, 1, 2, 3, and 5 are done (lint fix, env/config hardening,
-relay verification, live rerank measurement, UI). The remaining open work is the
-data / retrieval / catalog backlog — items 4, 6, 7, 8:
+**CI is green.** Items 0–6 are done; items 7 and 8 remain open:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -467,8 +487,22 @@ data / retrieval / catalog backlog — items 4, 6, 7, 8:
    with unit tests (32 total, +3). `RankedTarget` gains `light_sensitivity: number`;
    `fetchNightPlan`/`fetchTargetDetail` accept optional `when`; plan proxy reads and
    passes `when`. No new dependencies.
-6. **Retrieval polish** (A/B in the harness first): per-passage chunk dedup; a local
-   no-vendor cross-encoder (e.g. bge-reranker) as a third `rerankPassages` backend.
+6. ✅ **Retrieval polish — dedup + local BGE backend + live A/B (Done 2026-07-11).**
+   `knowledge.ts` now deduplicates normalized exact/prefix/conservative trigram-near-match
+   chunks within `(target,bibcode)` after the RPC and immediately before reranking; the
+   higher-similarity chunk wins. Six pure offline tests cover normalization, group
+   boundaries, stable winners, near-matches, and ordinary ingestion overlap. `rerank.ts`
+   adds explicit `RERANK_BACKEND=bge`: the optional Transformers.js package is hidden
+   behind a variable `import()` with `webpackIgnore`, and the quantized ONNX model loads
+   lazily only on first use. It is not a checked-in dependency and normal typecheck,
+   Vitest, and Next build paths do not load it. Two fake-runtime unit tests plus a real
+   synthetic local smoke test pass. The live harness shares one cached candidate snapshot
+   per query across raw/LLM/BGE variants and evaluates each once. Live result: raw hybrid
+   recall@3=0.36 / MRR=0.43 / nDCG@5=0.45; LLM=0.61 / 0.58 / 0.61; BGE=0.55 / 0.38 /
+   0.42. **BGE regresses versus LLM on all three required metrics**, so it remains opt-in;
+   production still defaults to Cohere → LLM → pass-through. Full web gate is green:
+   typecheck, lint, 40 tests, unchanged offline eval, and 12-route build. See §3 and
+   `evals/README.md`.
 7. **Copilot faithfulness in CI-adjacent form.** `OpenAIJudge` exists; wire a small
    live-gated faithfulness pass over a few canned copilot answers to catch ungrounded
    claims (offline uses `MockJudge`).
@@ -501,6 +535,8 @@ pnpm install
 pnpm --dir apps/web approve-builds                       # sharp/esbuild native builds (local machines)
 cp apps/web/.env.example apps/web/.env.local             # Supabase URL/anon + OPENAI (+ COHERE)
                                                          # optional: OPENAI_BASE_URL=<relay>/v1
+# Optional local reranker: install @huggingface/transformers as a dev-only package,
+# then set RERANK_BACKEND=bge. First use downloads/caches the quantized public model.
 pnpm --filter @astroscout/web dev                        # http://localhost:3000
 ```
 `/plan` works without auth; sign-in (magic link) unlocks save/log; `/chat` needs
