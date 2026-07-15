@@ -331,9 +331,12 @@ non-goals, acceptance criteria, evidence, rollback, and stop conditions—is:
 
 The new ledger is deliberately open:
 
-1. [ ] **PA-0 — credential/key-boundary incident closure:** obtain provider-side relay
-   credential revocation, deploy a replacement without recording it, verify the Supabase
-   browser key is publishable/anon, and rerun signed-in chat/accounting/log acceptance.
+1. [x] **PA-0 — credential/key-boundary incident closure (complete 2026-07-16):** the
+   provider reports the earlier relay credential disabled; the bounded replacement is in
+   Vercel Production and Preview; the deployed Supabase browser key is publishable; and
+   signed-in chat/accounting/content-free-log acceptance passed. The preserved operational
+   correction and non-secret evidence are recorded in `STATE.md` item 23 and
+   `docs/evidence/2026-07-16-pa0-credential-closeout.md`.
 2. [ ] **PA-1 — immutable plan provenance and saved date:** bind ranking, projection,
    observer context, and save to one request snapshot; persist the requested
    `planned_for`; validate server-action input and affected-row outcomes.

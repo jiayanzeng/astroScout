@@ -1111,6 +1111,10 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     confirmation rather than an inferred repository claim. Follow-up is explicitly deferred
     and tracked below.
 
+    **Superseding correction (2026-07-16):** provider-side disablement and replacement are
+    now independently verified and recorded in item 23. The paragraph above remains as the
+    measured 2026-07-15 state rather than being rewritten after the fact.
+
 20. ✅ **Documentation and operational reconciliation (Done 2026-07-15).** The root,
     API, and web READMEs were checked against the current routes, UI actions, migrations,
     retrieval RPC, production projection guard, auth boundary, gear behavior, and chat
@@ -1216,9 +1220,41 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     skipped**, and a successful **14-route** build after the preserved sandbox worker-port
     failure and permitted rerun. Hosted services were not re-tested by the audit.
 
+23. ✅ **PA-0 — credential and key-boundary incident closed (Provider and production
+    verified 2026-07-16).** The relay provider independently showed the earlier credential
+    disabled. A replacement was installed in Vercel's sensitive `OPENAI_API_KEY` row for
+    both Production and Preview, and production deployment
+    `5kFsEWX3FepoRz3Si9aK4SXoPta8` from commit `5fd3151` reached Ready. The deployed browser
+    bundle exactly matched the configured `sb_publishable_` Supabase web key and contained
+    no `sb_secret_` key class, so the public key was correctly left unrotated.
+
+    The provider operation had one preserved failure: the form retained numeric defaults
+    and created eleven replacement tokens at ¥1,010 each instead of one at ¥10. All ten
+    unintended suffixed tokens were disabled immediately, the retained unsuffixed token was
+    reduced to ¥10, and final provider state showed exactly one new token enabled; the old
+    token remained disabled. No credential value, fingerprint, masked value, screenshot, or
+    private text is recorded.
+
+    Signed-in production acceptance used the built-in non-private Auckland starter.
+    `planNight` completed two model steps. Its content-free usage row reached `completed`
+    with 2,882 input, 425 output, and 3,307 total tokens, estimated cost `$0.00068730`,
+    17,072 ms duration, and no failure reason. Five correlated Vercel events covered request
+    start, tool completion, two steps, and request completion; their schema contained only
+    correlation/status/tool/step/timing/token/cost fields and no prompt, response, message
+    content, tool payload, user ID, authorization, cookie, email, API-key, or secret field.
+    Full non-secret evidence is preserved in
+    `docs/evidence/2026-07-16-pa0-credential-closeout.md`.
+
+    No application code, schema, dependency, corpus row, calibration artifact, or model
+    constant changed. Local closeout gates remained green: API Ruff/format/mypy plus
+    **99 passed / 19 deselected**; web typecheck/ESLint plus **83 passed / 11 skipped** and
+    a successful **14-route** optimized build. The first sandboxed `uv sync` attempt failed
+    because the existing uv cache was not readable, and the first sandboxed Turbopack build
+    failed because worker port binding was denied; the permitted reruns passed.
+
 ### Post-audit production-closeout workstream (opened 2026-07-15)
 
-- [ ] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
+- [x] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
   the deployed Supabase key class, with no credential value recorded.
 - [ ] **PA-1 planner provenance:** bind ranking/projection/save to one immutable request
   context, persist the actual future `planned_for` date, and validate mutation outcomes.
@@ -1236,24 +1272,22 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
 - [ ] **PA-8 truthful closeout:** rerun intended-host acceptance and reconcile every status
   document only after the corresponding behavior is measured.
 
-### P1 production credential follow-up (deferred 2026-07-15)
+### P1 production credential follow-up (closed 2026-07-16)
 
 Credential values are intentionally not recorded here, elsewhere in the repository, or in
-task output. These items are documentation-only until the maintainer explicitly resumes them.
+task output. The maintainer resumed these operations on 2026-07-16; item 23 and its linked
+evidence record contain the measured non-secret closure.
 
-- [ ] **`OPENAI_API_KEY` / relay credential — rotate and revoke (high priority):** the
+- [x] **`OPENAI_API_KEY` / relay credential — rotated and revoked:** the
   server-only value appeared in the Vercel import page's browser accessibility snapshot even
-  though the field was marked sensitive. Revoke the exposed value at the relay provider,
-  create a replacement, update both Vercel Production and Preview, redeploy, and repeat the
-  signed-in chat/accounting/log smoke. Close this item only with provider-side revocation
-  confirmation plus successful use of the replacement; never paste either value into code,
-  documentation, task messages, or logs.
-- [ ] **`NEXT_PUBLIC_SUPABASE_ANON_KEY` — verify key class and boundary (review):** this
+  though the field was marked sensitive. The provider now reports it disabled; the bounded
+  replacement is active in Production and Preview, and deployment plus signed-in
+  chat/accounting/log acceptance passed without recording either value.
+- [x] **`NEXT_PUBLIC_SUPABASE_ANON_KEY` — key class and boundary verified:** this
   client-public value appeared in the same snapshot. Exposure alone is expected for an anon
-  or publishable key and is not treated as a secret-key rotation incident. Confirm that the
-  deployed value is the project's anon/publishable credential, never `service_role` or a
-  Supabase secret key, and retain the existing RLS/explicit-grant acceptance as the security
-  boundary. Rotate only if the wrong key class was deployed or incident policy requires it.
+  or publishable key and is not a secret-key rotation incident. The deployed bundle exactly
+  matched the configured `sb_publishable_` web key and contained no `sb_secret_` class;
+  existing RLS and explicit grants remain the security boundary.
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 

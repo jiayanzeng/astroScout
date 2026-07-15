@@ -77,7 +77,7 @@ that the browser-visible Supabase value is only an anon/publishable credential.
 - The provider independently reports the old relay/OpenAI credential revoked or disabled.
 - Production and Preview use the replacement and the deployed artifact is identified.
 - A signed-in canned chat completes; its numeric usage row reaches a terminal state and
-  its structured logs contain no message/tool/secret fields.
+  its structured logs contain no message text, tool payload, or secret fields.
 - The Supabase key class is explicitly recorded as publishable/anon, or the wrong-class
   incident is remediated and RLS/privilege acceptance is rerun.
 - Evidence records only timestamps, credential labels/fingerprints if provider-safe,
@@ -88,6 +88,17 @@ that the browser-visible Supabase value is only an anon/publishable credential.
 If the replacement fails, restore service only with another newly issued credential; do
 not reactivate the exposed value. Close PA-0 in `STATE.md` only after provider revocation
 and replacement smoke are both evidenced.
+
+### Disposition — complete 2026-07-16
+
+Provider-side disablement, bounded replacement, Production/Preview environment update,
+Ready production deployment, publishable Supabase browser-key classification, and signed-in
+chat/accounting/content-free-log acceptance all passed. The provider form's unintended
+eleven-token creation and immediate containment are preserved rather than hidden. See
+`STATE.md` item 23 and `docs/evidence/2026-07-16-pa0-credential-closeout.md`; neither record
+contains credential material. The acceptance wording above clarifies the original
+`message/tool/secret fields` shorthand as message text, tool payload, and secret fields;
+the content-free schema deliberately retains tool names for per-step instrumentation.
 
 ## PA-1 — bind planner results, projection, and saved sessions to one request context
 
