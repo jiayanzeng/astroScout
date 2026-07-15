@@ -47,8 +47,9 @@ location (+when, optional gear/SQM) ─► FastAPI /plan/night ─► dark_windo
                                           ─► ranked targets + optional pure budget ranges
 web /plan ─► /api/plan (proxy) ─► table (save session / log observation → Supabase RLS)
 selected target + gear ─► /api/project ─► /plan/project ─► 30-night completion detail
-copilot /chat ─► /api/chat (AI SDK streamText, 3 tools) ─► planNight / getTargetDetail
-                                          / searchKnowledge(embed→hybrid_search→rerank)
+copilot /chat + trusted /plan observer context ─► /api/chat (AI SDK streamText, 3 tools)
+                 ├─► server-bound planNight / getTargetDetail (model never supplies coordinates)
+                 └─► required searchKnowledge ─► deterministic cited corpus-only science response
 ingestion: ADS object resolver ─► abstracts ─► chunk ─► embed (base-URL aware)
                                           ─► pgvector (documents)  [Python CLI]
 ```
@@ -141,14 +142,18 @@ astroscout/
 │           ├── api.ts                 # types Visibility/RankedTarget/NightPlan/TargetDetail + fetchers ★
 │           ├── knowledge.ts           # hybrid_search(15) → per-document dedup → rerank(5) ★
 │           ├── rerank.ts              # Cohere / LLM / lazy local BGE backends ★
-│           ├── ai.ts                  # tools planNight/getTargetDetail/searchKnowledge; ChatMessage type ★
-│           ├── format.ts, utils.ts + __tests__/{format,knowledge,rerank}.test.ts
+│           ├── ai.ts                  # server-bound planning + literature tools; ChatMessage type ★
+│           ├── observer-context.ts    # validated persisted /plan coordinates/date/source ★
+│           ├── chat-policy.ts         # deterministic required-tool trajectory policy ★
+│           ├── grounded-response.ts   # suppress model science prose; cited corpus excerpts ★
+│           ├── format.ts, utils.ts + __tests__/ (incl. observer/tool/policy/stream tests)
 │           └── supabase/{client,server,types}.ts
 │   └── evals/                         # eval harness (offline-runnable)  ★
 │       ├── metrics.ts (+test)         # hit@k, precision@k, recall@k, MRR, nDCG, uniqueInOrder
 │       ├── fusion.ts (+test)          # reciprocalRankFusion (RRF)
 │       ├── faithfulness.ts (+test)    # claim split + score; MockJudge; judge-openai.ts (OpenAIJudge)
 │       ├── faithfulness-cases.ts + faithfulness.live.test.ts  # 6 live-gated canned cases
+│       ├── agent-trajectory.live.test.ts # 5 opt-in live tool/citation/grounding cases ★
 │       ├── text.ts                    # tokens/stem/tf/cosineSparse
 │       ├── retriever.ts               # Lexical / Dense / Hybrid / Live retrievers
 │       │                              #   variants: raw hybrid, explicit LLM, explicit BGE
@@ -231,9 +236,14 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 8. **Versions: latest stable, transparently.** Resolved to Next 16 / AI SDK v6 (the plan
    said Next 15). Flagged in `apps/web/README.md` with a pin-to-15 command. ESLint pinned
    to **9** because eslint-config-next 16's flat config breaks on ESLint 10.
-9. **Copilot answers are auditable.** The chat UI renders each tool call (what was queried
-   + what came back, incl. cited sources w/ similarity + ADS links). The system prompt
-   instructs grounding via `searchKnowledge` and admitting when the corpus is empty.
+9. **Copilot answers are auditable and location-bound.** `/plan` persists only explicit
+   validated observer coordinates, date, and source (`manual`, `geolocation`, or
+   `saved_session`). Chat sends that application state as request context; server-created
+   `planNight` / `getTargetDetail` tools have no model-controlled latitude/longitude
+   fields and echo the exact context in every card. Missing context returns structured
+   `location_required`. Science/explanation trajectories are forced through
+   `searchKnowledge`; model-authored science text is removed from the UI stream and
+   replaced with short cited corpus excerpts, or the exact insufficient-evidence answer.
 10. **No emojis/secrets in code; keep CI green.** `ruff`, `ruff format --check`, `mypy
     strict`, `pytest`, plus web `lint/typecheck/test/build` must all stay green.
     (Green as of 2026-07-10; the transient `rag/embeddings.py` lint regression is fixed.)
@@ -437,8 +447,24 @@ slightly ahead, still consistent with “no discernible difference.”
   `BgeReranker`, which dynamically imports the optional `@huggingface/transformers`
   package and lazy-loads/caches the quantized `Xenova/bge-reranker-base` ONNX conversion
   of BAAI's model. First use downloads about 300 MB unless cached; inference is local.
-- `ai.ts`: tools `planNight`, `getTargetDetail`, `searchKnowledge`; typed `ChatMessage =
-  UIMessage<never,UIDataTypes,InferUITools<typeof tools>>`. Chat route uses
+- `observer-context.ts`: strict Zod context with latitude/longitude bounds, three source
+  labels, optional observing date/session id, and local-storage read/write helpers.
+  `PlanClient` restores it, marks manual/geolocation changes, writes only after a
+  successful plan, and upgrades the source to `saved_session` after a successful save.
+- `ai.ts`: `createChatTools(observer)` creates `planNight`, `getTargetDetail`, and
+  `searchKnowledge`. Planning schemas deliberately exclude coordinates; their execution
+  closes over the parsed request context and returns `{status,observer,...}` or
+  `location_required`. Typed `ChatMessage` is inferred from that tool factory. Chat uses
+  per-send/retry request context, and every planning/detail card prints coordinates,
+  source, and date/upcoming-night provenance.
+- `chat-policy.ts`: classifies the latest request and deterministically forces required
+  tool steps before final prose. Science requires `searchKnowledge`; planning requires
+  `planNight`; named planning/comparison targets require one exact detail call each.
+  Bare catalog replies (for example `M1`) are planning, so they cannot become an
+  unsupported memory answer. `grounded-response.ts` removes all model-authored science
+  text chunks while preserving tool cards, then emits at most three 24-word cited corpus
+  excerpts. Empty/incompletely attributed results emit the exact insufficient-evidence
+  message. Chat route still uses
   `await convertToModelMessages(...)` (v6 is async), `stopWhen: stepCountIs(6)`,
   `toUIMessageStreamResponse()`, and the stateless `openai.chat("gpt-4o-mini")` provider
   for multi-step tool loops. Client uses `useChat<ChatMessage>()` + `sendMessage({text})`,
@@ -539,6 +565,13 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
   by `describe.skipIf(!process.env.OPENAI_API_KEY)`; grounded scores must be ≥0.8 and
   planted cases <0.8. Verified live 2026-07-11: **6/6 passed**. With no key, the same six
   cases are skipped and the existing 40 offline tests still pass.
+- `agent-trajectory.live.test.ts` is separately gated by
+  `RUN_LIVE_AGENT_EVALS=1` plus `OPENAI_API_KEY`. Deterministic planning/literature
+  fixtures isolate agent behavior while the real configured model chooses tool calls.
+  Cases cover M31 versus M42, M101, Alpha Centauri, empty corpus, and misspelled
+  `Jupter`; they assert exact required tool sets, displayed title+bibcode citations,
+  no retrieval for planning-only prompts, exact insufficient-evidence behavior, and
+  `OpenAIJudge` faithfulness ≥0.8 for every science response.
 
 ---
 
@@ -549,13 +582,12 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-11: **72 unit tests pass**, 14 deselected as
-  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. The C4
-  gear-aware rank integration check also passes explicitly. Current web source passes
-  typecheck, lint, the unchanged offline retrieval table, and the 13-route production
-  build. No-key Vitest: **45 passed + 6 live
-  faithfulness cases skipped**. Live B3 gate: **6/6 passed** through `OpenAIJudge`.
-  The B2 live A/B is recorded above (§5 item 6).
+- **Current status:** API verified 2026-07-15: **72 unit tests pass**, 16 deselected as
+  integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. Current
+  web source passes typecheck, lint, and the 13-route production build. No-key Vitest:
+  **61 passed + 11 live cases skipped** (six canned faithfulness + five agent trajectory).
+  Live B3 remains **6/6 passed**; the new live trajectory gate is **5/5 passed** after
+  the corpus-only response policy. The B2 live A/B is recorded above (§5 item 6).
 - **How to verify locally**:
   - API: from `apps/api`, `PYTHONPATH=src python -m pytest -m "not integration"`, plus
     `ruff check .`, `ruff format --check .`, `mypy src`.
@@ -603,7 +635,7 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**Repository gates are green through item 17.** Track C3 live closeout was reopened by
+**Repository gates are green through item 18.** Track C3 live closeout was reopened by
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
 application acceptance in item 17. C4(d) remains an explicitly deferred stretch and the
 Track C follow-up backlog below remains open where marked:
@@ -849,6 +881,28 @@ Track C follow-up backlog below remains open where marked:
     `/plan/night` and `/plan/project`; M42 displayed **34.8–69.5 h**, a 30-night horizon,
     and best projected night 2026-08-12. The final reload showed the genuine empty state
     with no permission error, and the acceptance profile was removed.
+
+18. ✅ **P0 — make chat recommendations trustworthy (Done 2026-07-15).** `/plan` now
+    persists the last successful explicit observer coordinates, observing date, and
+    source; chat passes that validated application state on every send/retry. Server-bound
+    planning tools no longer expose latitude/longitude to the model and every plan/detail
+    result card audits coordinates, source, and date. Missing context returns a structured
+    `location_required` card; the generic comparison starter asks for location, while the
+    Auckland starter explicitly binds `-36.85,174.76`. Deterministic trajectory policy
+    forces retrieval for science, one plan plus per-target details for comparisons, and
+    normalizes `Jupter`; bare `M1` is treated as planning rather than answered from memory.
+    The initial live trajectory run correctly failed both science cases at **0.33**
+    faithfulness even though tool calls/citations were present. The threshold and fixtures
+    were not weakened: the final policy suppresses model-authored science text and emits
+    short cited corpus evidence (or the exact insufficient-evidence response). The rerun
+    passed **5/5**. Browser acceptance at Auckland measured identical `/plan` and `/chat`
+    values: **Bortle 6, 11.1 h dark, 1% Moon**, M31 peak **11.7° / 0 h / score 0**, and
+    M42 peak **22.4° / 0.3 h / score 21.1**. A clean-origin `M1` call displayed only
+    `planNight · location required` and requested coordinates; no location or object fact
+    was invented. A real Orion science turn displayed five literature cards and only
+    cited corpus excerpts. Final gates: API **72 passed / 16 deselected**; web typecheck/
+    ESLint clean, no-key Vitest **61 passed + 11 skipped**, live agent **5/5**, and the
+    **13-route** production build passed. No dependencies or committed data changed.
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 

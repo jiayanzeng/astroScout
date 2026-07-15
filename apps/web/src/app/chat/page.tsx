@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 
@@ -7,14 +8,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ChatMessage } from "@/lib/ai";
+import {
+  formatObserverContext,
+  readObserverContext,
+  writeObserverContext,
+  type ObserverContext,
+} from "@/lib/observer-context";
 
 type Part = ChatMessage["parts"][number];
 
-const STARTER_PROMPTS = [
-  "What should I observe tonight from Auckland?",
-  "Compare M31 and M42 for imaging tonight.",
-  "Why is the Orion Nebula scientifically interesting?",
-];
+const AUCKLAND_CONTEXT: ObserverContext = {
+  lat: -36.85,
+  lon: 174.76,
+  source: "manual",
+  label: "Auckland starter",
+};
 
 function ToolBox({ children }: { children: React.ReactNode }) {
   return <div className="mt-1 rounded-md border bg-muted/40 px-3 py-2 text-xs">{children}</div>;
@@ -23,14 +31,25 @@ function ToolBox({ children }: { children: React.ReactNode }) {
 function PlanNightTool({ part }: { part?: Extract<Part, { type: "tool-planNight" }> }) {
   if (!part?.state) return null;
   if (part.state === "output-error")
-    return <ToolBox><span className="text-destructive">⚠️ planNight: {part.errorText}</span></ToolBox>;
+    return <ToolBox><span className="text-destructive">planNight error: {part.errorText}</span></ToolBox>;
   if (part.state !== "output-available")
-    return <ToolBox><span className="text-muted-foreground animate-pulse font-mono">🌌 ranking targets…</span></ToolBox>;
-  const p = part.output;
+    return <ToolBox><span className="text-muted-foreground animate-pulse font-mono">planNight · ranking targets…</span></ToolBox>;
+  if (part.output.status === "location_required") {
+    return (
+      <ToolBox>
+        <div className="font-mono text-amber-300">planNight · location required</div>
+        <div className="text-muted-foreground mt-1">No trusted observer coordinates were used.</div>
+      </ToolBox>
+    );
+  }
+  const { plan: p, observer } = part.output;
   return (
     <ToolBox>
       <div className="text-muted-foreground font-mono">
-        🌌 planNight · {p.dark_hours}h dark · moon {Math.round(p.moon_illumination * 100)}% · Bortle {p.bortle}
+        planNight · {p.dark_hours}h dark · moon {Math.round(p.moon_illumination * 100)}% · Bortle {p.bortle}
+      </div>
+      <div className="mt-0.5 font-mono text-[11px] text-sky-300">
+        observer {formatObserverContext(observer)}
       </div>
       <ul className="mt-1 space-y-0.5">
         {p.targets.slice(0, 5).map((t) => (
@@ -48,13 +67,24 @@ function PlanNightTool({ part }: { part?: Extract<Part, { type: "tool-planNight"
 function TargetDetailTool({ part }: { part?: Extract<Part, { type: "tool-getTargetDetail" }> }) {
   if (!part?.state) return null;
   if (part.state === "output-error")
-    return <ToolBox><span className="text-destructive">⚠️ getTargetDetail: {part.errorText}</span></ToolBox>;
+    return <ToolBox><span className="text-destructive">getTargetDetail error: {part.errorText}</span></ToolBox>;
   if (part.state !== "output-available")
-    return <ToolBox><span className="text-muted-foreground animate-pulse font-mono">🔭 checking {part.input?.name ?? "…"}…</span></ToolBox>;
-  const t = part.output;
+    return <ToolBox><span className="text-muted-foreground animate-pulse font-mono">getTargetDetail · checking {part.input?.name ?? "…"}…</span></ToolBox>;
+  if (part.output.status === "location_required") {
+    return (
+      <ToolBox>
+        <div className="font-mono text-amber-300">getTargetDetail · location required</div>
+        <div className="text-muted-foreground mt-1">No trusted observer coordinates were used.</div>
+      </ToolBox>
+    );
+  }
+  const { target: t, observer } = part.output;
   return (
     <ToolBox>
-      <div className="text-muted-foreground font-mono">🔭 getTargetDetail · {t.common_name}</div>
+      <div className="text-muted-foreground font-mono">getTargetDetail · {t.common_name}</div>
+      <div className="mt-0.5 font-mono text-[11px] text-sky-300">
+        observer {formatObserverContext(observer)}
+      </div>
       <div className="mt-0.5 flex items-center gap-2">
         <Badge variant={t.rating}>{t.rating}</Badge>
         peak {t.peak_altitude_deg}° · up {t.hours_visible}h · moon sep {t.moon_separation_deg}° ·{" "}
@@ -67,13 +97,13 @@ function TargetDetailTool({ part }: { part?: Extract<Part, { type: "tool-getTarg
 function KnowledgeTool({ part }: { part?: Extract<Part, { type: "tool-searchKnowledge" }> }) {
   if (!part?.state) return null;
   if (part.state === "output-error")
-    return <ToolBox><span className="text-destructive">⚠️ searchKnowledge: {part.errorText}</span></ToolBox>;
+    return <ToolBox><span className="text-destructive">searchKnowledge error: {part.errorText}</span></ToolBox>;
   if (part.state !== "output-available")
-    return <ToolBox><span className="text-muted-foreground animate-pulse font-mono">📚 searching literature for “{part.input?.query ?? "…"}”…</span></ToolBox>;
-  const passages = part.output;
+    return <ToolBox><span className="text-muted-foreground animate-pulse font-mono">searchKnowledge · searching literature for “{part.input?.query ?? "…"}”…</span></ToolBox>;
+  const passages = part.output.passages;
   return (
     <ToolBox>
-      <div className="text-muted-foreground font-mono">📚 searchKnowledge · {passages.length} sources</div>
+      <div className="text-muted-foreground font-mono">searchKnowledge · {passages.length} sources</div>
       {passages.length === 0 ? (
         <div className="text-muted-foreground mt-1">No matching passages.</div>
       ) : (
@@ -81,7 +111,8 @@ function KnowledgeTool({ part }: { part?: Extract<Part, { type: "tool-searchKnow
           {passages.map((p, i) => (
             <li key={i} className="border-l-2 pl-2">
               <div className="flex items-center gap-2">
-                <span className="font-medium">{p.title ?? p.bibcode ?? "Untitled"}</span>
+                <span className="font-medium">{p.title ?? "Untitled"}</span>
+                <span className="text-muted-foreground font-mono">{p.bibcode ?? "no bibcode"}</span>
                 <span className="text-muted-foreground font-mono">{p.similarity.toFixed(2)}</span>
               </div>
               {p.url && (
@@ -100,8 +131,18 @@ function KnowledgeTool({ part }: { part?: Extract<Part, { type: "tool-searchKnow
 export default function ChatPage() {
   const { messages, sendMessage, status, error, regenerate } = useChat<ChatMessage>();
   const [input, setInput] = useState("");
+  const [observer, setObserver] = useState<ObserverContext | null>(null);
+  const [observerLoaded, setObserverLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const canSend = status === "ready" || status === "error";
+  const canSend = observerLoaded && (status === "ready" || status === "error");
+
+  useEffect(() => {
+    const restore = window.setTimeout(() => {
+      setObserver(readObserverContext(window.localStorage));
+      setObserverLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(restore);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -109,14 +150,20 @@ export default function ChatPage() {
 
   function submit() {
     if (!input.trim() || !canSend) return;
-    sendMessage({ text: input });
+    void sendMessage({ text: input }, { body: { observer } });
     setInput("");
   }
 
-  function sendStarter(text: string) {
+  function sendStarter(text: string, context: ObserverContext | null = observer) {
     if (!canSend) return;
-    sendMessage({ text });
+    if (context) writeObserverContext(window.localStorage, context);
+    setObserver(context);
+    void sendMessage({ text }, { body: { observer: context } });
   }
+
+  const comparisonPrompt = observer
+    ? "Compare M31 and M42 for imaging tonight using my saved observer context."
+    : "Compare M31 and M42 for imaging tonight; ask me to set observer coordinates first.";
 
   return (
     <main className="mx-auto flex h-[calc(100dvh-3rem)] max-w-xl flex-col gap-4 px-4 py-8">
@@ -127,21 +174,54 @@ export default function ChatPage() {
         </p>
       </header>
 
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+        {observer ? (
+          <>
+            <span className="font-medium">Trusted observer:</span>{" "}
+            <span className="font-mono text-sky-300">{formatObserverContext(observer)}</span>
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-amber-300">No trusted observer location.</span>{" "}
+            <Link href="/plan" className="underline underline-offset-2">
+              Set coordinates on Plan
+            </Link>{" "}
+            before requesting location-specific advice.
+          </>
+        )}
+      </div>
+
       <div className="flex-1 space-y-4 overflow-y-auto">
         {messages.length === 0 && (
           <div className="flex flex-col gap-2" aria-label="Starter prompts">
-            {STARTER_PROMPTS.map((prompt) => (
-              <Button
-                key={prompt}
-                type="button"
-                variant="outline"
-                className="h-auto justify-start whitespace-normal py-2 text-left"
-                onClick={() => sendStarter(prompt)}
-                disabled={!canSend}
-              >
-                {prompt}
-              </Button>
-            ))}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto justify-start whitespace-normal py-2 text-left"
+              onClick={() =>
+                sendStarter(
+                  "What should I observe tonight from Auckland (-36.85, 174.76)?",
+                  AUCKLAND_CONTEXT,
+                )
+              }
+              disabled={!canSend}
+            >
+              What should I observe tonight from Auckland (-36.85, 174.76)?
+            </Button>
+            {[comparisonPrompt, "Why is the Orion Nebula scientifically interesting?"].map(
+              (prompt) => (
+                <Button
+                  key={prompt}
+                  type="button"
+                  variant="outline"
+                  className="h-auto justify-start whitespace-normal py-2 text-left"
+                  onClick={() => sendStarter(prompt)}
+                  disabled={!canSend}
+                >
+                  {prompt}
+                </Button>
+              ),
+            )}
           </div>
         )}
         {messages.map((m) => (
@@ -166,7 +246,12 @@ export default function ChatPage() {
             className="border-destructive/40 bg-destructive/10 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
           >
             <span className="text-destructive">Something went wrong talking to the model.</span>
-            <Button type="button" variant="outline" size="sm" onClick={() => void regenerate()}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void regenerate({ body: { observer } })}
+            >
               Retry
             </Button>
           </div>

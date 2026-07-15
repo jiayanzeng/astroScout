@@ -17,6 +17,12 @@ import {
   lightSensitivityTier,
   type LightSensitivityTier,
 } from "@/lib/format";
+import {
+  readObserverContext,
+  writeObserverContext,
+  type ObserverContext,
+  type ObserverLocationSource,
+} from "@/lib/observer-context";
 import type { GearProfile } from "@/lib/supabase/types";
 
 const SELECTED_GEAR_STORAGE_KEY = "astroscout:selected-gear-profile";
@@ -89,6 +95,7 @@ export function PlanClient({
   const [lat, setLat] = useState("-36.85");
   const [lon, setLon] = useState("174.76");
   const [when, setWhen] = useState("");
+  const [locationSource, setLocationSource] = useState<ObserverLocationSource>("manual");
   const [plan, setPlan] = useState<NightPlan | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [gearProfiles, setGearProfiles] = useState(initialGearProfiles);
@@ -113,6 +120,13 @@ export function PlanClient({
       }
       const savedSqm = window.localStorage.getItem(SKY_SQM_STORAGE_KEY);
       if (savedSqm) setSkySqm(savedSqm);
+      const observer = readObserverContext(window.localStorage);
+      if (observer) {
+        setLat(String(observer.lat));
+        setLon(String(observer.lon));
+        setWhen(observer.when ?? "");
+        setLocationSource(observer.source);
+      }
       setGearSelectionLoaded(true);
     }, 0);
     return () => window.clearTimeout(restore);
@@ -157,15 +171,55 @@ export function PlanClient({
     setProjectTarget(null);
   }
 
+  function observerContext(
+    date: string,
+    source: ObserverLocationSource = locationSource,
+    sessionId?: string,
+  ): ObserverContext | null {
+    const latitude = Number(lat);
+    const longitude = Number(lon);
+    if (
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return null;
+    }
+    return {
+      lat: latitude,
+      lon: longitude,
+      source,
+      ...(date ? { when: date } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    };
+  }
+
+  function persistObserverContext(
+    date: string,
+    source: ObserverLocationSource = locationSource,
+    sessionId?: string,
+  ) {
+    const context = observerContext(date, source, sessionId);
+    if (context) writeObserverContext(window.localStorage, context);
+  }
+
   async function runPlan(whenOverride?: string) {
     const w = whenOverride ?? when;
+    const observer = observerContext(w);
+    if (!observer) {
+      setError("Latitude must be -90 to 90 and longitude must be -180 to 180.");
+      return;
+    }
     const sqm = selectedGearProfile ? validateSkySqm() : undefined;
     if (sqm === null) return;
     setLoading(true);
     setError(null);
     setSessionId(null);
     try {
-      const params = new URLSearchParams({ lat, lon });
+      const params = new URLSearchParams({ lat: String(observer.lat), lon: String(observer.lon) });
       if (w) params.set("when", w);
       if (selectedGearProfile) {
         params.set("f_ratio", String(selectedGearProfile.f_ratio));
@@ -177,6 +231,7 @@ export function PlanClient({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "request failed");
       setPlan(data as NightPlan);
+      writeObserverContext(window.localStorage, observer);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setPlan(null);
@@ -228,6 +283,7 @@ export function PlanClient({
       ({ coords }) => {
         setLat(coords.latitude.toFixed(2));
         setLon(coords.longitude.toFixed(2));
+        setLocationSource("geolocation");
         setLocating(false);
       },
       () => {
@@ -246,7 +302,11 @@ export function PlanClient({
         longitude: Number(lon),
       });
       if (result.error) setError(result.error);
-      else if (result.id) setSessionId(result.id);
+      else if (result.id) {
+        setSessionId(result.id);
+        setLocationSource("saved_session");
+        persistObserverContext(when, "saved_session", result.id);
+      }
     });
   }
 
@@ -288,7 +348,10 @@ export function PlanClient({
               Latitude
               <Input
                 value={lat}
-                onChange={(event) => setLat(event.target.value)}
+                onChange={(event) => {
+                  setLat(event.target.value);
+                  setLocationSource("manual");
+                }}
                 inputMode="decimal"
                 placeholder="Latitude"
               />
@@ -316,7 +379,10 @@ export function PlanClient({
               Longitude
               <Input
                 value={lon}
-                onChange={(event) => setLon(event.target.value)}
+                onChange={(event) => {
+                  setLon(event.target.value);
+                  setLocationSource("manual");
+                }}
                 inputMode="decimal"
                 placeholder="Longitude"
               />

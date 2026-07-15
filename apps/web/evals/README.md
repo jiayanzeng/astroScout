@@ -129,6 +129,30 @@ node --env-file=.env.local node_modules/vitest/vitest.mjs run \
 Measured live result: **6/6 cases passed** through the configured `gpt-4o-mini` judge.
 The fixture is canned and sends no retrieved corpus or user data.
 
+## P0 live agent-trajectory gate (2026-07-15)
+
+`agent-trajectory.live.test.ts` measures the production trajectory policy rather than a
+canned final answer. Its five public astronomy fixtures cover M31 versus M42, M101,
+Alpha Centauri, an empty corpus, and misspelled `Jupter`. The gate asserts required tool
+sets, per-target comparison details, title+bibcode citations, the exact
+insufficient-evidence response, and science faithfulness of at least 0.8. Planning and
+literature tool outputs are deterministic fixtures; only model tool choice/final control
+flow and the existing `OpenAIJudge` are live.
+
+The suite is doubly opt-in so an ordinary developer key does not create surprise model
+traffic:
+
+```bash
+cd apps/web
+RUN_LIVE_AGENT_EVALS=1 node --env-file=.env.local \
+  node_modules/vitest/vitest.mjs run evals/agent-trajectory.live.test.ts
+```
+
+The first measured run caught unsupported model additions (both science cases scored
+0.33). The threshold was retained. Production now removes model-authored science text
+from the UI stream and emits only short cited corpus evidence, or the exact
+insufficient-evidence response. The corrected live gate passes **5/5**.
+
 ## Extending
 
 - Add cases to `RETRIEVAL_DATASET` in `dataset.ts`.
