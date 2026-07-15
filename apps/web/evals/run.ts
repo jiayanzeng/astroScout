@@ -3,11 +3,14 @@
  *
  *   pnpm --filter @astroscout/web eval     # offline: sparse vs dense vs hybrid
  *   OPENAI_API_KEY=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
- *     pnpm --filter @astroscout/web eval   # live: raw hybrid vs LLM vs BGE rerank
+ *     pnpm --filter @astroscout/web eval   # live: raw hybrid vs LLM rerank
+ *   RUN_BGE_EVALS=1 adds the opt-in local BGE arm.
  *
  * Writes evals/report.json. Optionally forwards to Braintrust when BRAINTRUST_API_KEY is set.
  */
 import { writeFileSync } from "node:fs";
+
+import { createClient } from "@supabase/supabase-js";
 
 import { RETRIEVAL_DATASET, type EvalCase } from "./dataset";
 import { hitAtK, mean, ndcgAtK, recallAtK, reciprocalRank, uniqueInOrder } from "./metrics";
@@ -72,6 +75,23 @@ function row(name: string, a: ReturnType<typeof agg>): string {
   );
 }
 
+async function measureLiveCorpus(): Promise<{ chunks: number; targets: number }> {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  );
+  const { data, error, count } = await supabase
+    .from("documents")
+    .select("target", { count: "exact" });
+  if (error) throw new Error(`Could not measure live corpus: ${error.message}`);
+  const targets = new Set(
+    (data ?? [])
+      .map((row) => row.target)
+      .filter((target): target is string => typeof target === "string" && target.length > 0),
+  );
+  return { chunks: count ?? data?.length ?? 0, targets: targets.size };
+}
+
 async function main(): Promise<void> {
   const live = Boolean(
     process.env.OPENAI_API_KEY &&
@@ -87,7 +107,9 @@ async function main(): Promise<void> {
     ? [
         new LiveRetriever(false, liveCandidates),
         new LiveRetriever("llm", liveCandidates),
-        new LiveRetriever("bge", liveCandidates),
+        ...(process.env.RUN_BGE_EVALS === "1"
+          ? [new LiveRetriever("bge", liveCandidates)]
+          : []),
       ]
     : [sparse, dense, hybrid, new RerankedRetriever(hybrid, new LexicalReranker())];
 
@@ -95,8 +117,19 @@ async function main(): Promise<void> {
   const semantic = RETRIEVAL_DATASET.filter((c) => c.kind === "semantic");
   const exactIds = new Set(exact.map((c) => c.id));
   const semanticIds = new Set(semantic.map((c) => c.id));
+  const planetIds = new Set(
+    RETRIEVAL_DATASET.filter((retrievalCase) => retrievalCase.group === "planet").map(
+      (retrievalCase) => retrievalCase.id,
+    ),
+  );
 
-  const report: Record<string, unknown> = { mode: live ? "live" : "offline", retrievers: [] };
+  const report: Record<string, unknown> = {
+    mode: live ? "live" : "offline",
+    dataset_cases: RETRIEVAL_DATASET.length,
+    planet_cases: planetIds.size,
+    ...(live ? { corpus: await measureLiveCorpus() } : {}),
+    retrievers: [],
+  };
   const retrieverReports: { name: string; results: CaseResult[] }[] = [];
 
   console.log(`\nMode: ${live ? "live (pgvector)" : "offline (lexical + simulated dense)"}\n`);
@@ -106,9 +139,11 @@ async function main(): Promise<void> {
     const all = await evalRetriever(r, RETRIEVAL_DATASET);
     const ex = all.filter((result) => exactIds.has(result.id));
     const se = all.filter((result) => semanticIds.has(result.id));
+    const planets = all.filter((result) => planetIds.has(result.id));
     console.log(row(r.name + " [all]", agg(all)));
     console.log(row("  ├ exact queries", agg(ex)));
-    console.log(row("  └ semantic queries", agg(se)));
+    console.log(row("  ├ semantic queries", agg(se)));
+    console.log(row("  └ planet queries", agg(planets)));
     retrieverReports.push({ name: r.name, results: all });
   }
   console.log("─".repeat(64));
@@ -118,6 +153,8 @@ async function main(): Promise<void> {
     aggregate: agg(results),
     aggregate_exact: agg(results.filter((result) => exactIds.has(result.id))),
     aggregate_semantic: agg(results.filter((result) => semanticIds.has(result.id))),
+    aggregate_planet: agg(results.filter((result) => planetIds.has(result.id))),
+    cases: results,
   }));
 
   writeFileSync(

@@ -3,7 +3,8 @@
 1. Create a project at https://supabase.com and grab the Project URL + anon key.
 2. Run the migrations in order: `0001_init.sql` → `0002_knowledge.sql` →
    `0003_hybrid_search.sql` → `0004_gear_profiles.sql` →
-   `0005_privileges_and_rls_repair.sql` → `0006_chat_usage_limits.sql`. Paste each file
+   `0005_privileges_and_rls_repair.sql` → `0006_chat_usage_limits.sql` →
+   `0007_observation_progress.sql`. Paste each file
    into the SQL editor, or use the Supabase CLI (`supabase db push`). `0005` is safe to
    reapply and is required for both existing and new projects; it makes API-role
    privileges explicit.
@@ -65,3 +66,12 @@ CI boots PostgreSQL 16 with pgvector, applies every migration, reapplies `0005` 
 idempotency, and runs `tests/track_c_acceptance.sql` plus
 `tests/chat_usage_acceptance.sql` for owner CRUD, cross-user denial, quota enforcement,
 content-free completion accounting, and authenticated RPC calls.
+
+## Observation progress (Track C4(d))
+
+`migrations/0007_observation_progress.sql` adds optional non-negative whole integration
+minutes to logged observations and an authenticated, security-invoker
+`observation_progress()` aggregate. RLS remains the ownership boundary: the RPC returns
+only the caller's target totals, while anonymous callers cannot execute it. Recorded
+minutes are user evidence; they do not automatically recalibrate the community budget
+model.

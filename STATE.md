@@ -236,7 +236,9 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    Target resolution has explicit domain semantics: unresolved names → 404, targets that
    require a different product flow → structured 422, and actual CDS/Simbad/network
    failures → 502. Next proxies validate presence before numeric conversion, so omitted
-   coordinates cannot silently become zero.
+   coordinates cannot silently become zero. A day with no astronomical darkness is a
+   structured 422 product state, while continuous polar darkness is an explicitly labelled,
+   bounded 24-hour planning window; neither is treated as an upstream 502.
 6. **Embedding model pinned on both sides.** Ingestion (Python) and retrieval (web) both
    use `text-embedding-3-small` (1536-d). A mismatch is a silent RAG bug — never diverge.
    Relay corollary (v0.6.1): if `OPENAI_BASE_URL` points at a relay, the relay must serve
@@ -245,8 +247,10 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    `chat_usage_events` are
    **user-scoped** (`auth.uid()`). Observation insert/update also proves that the
    referenced session belongs to the same authenticated user. SQL privileges are
-   explicit in `0005`; RLS policies do not replace grants. `documents` (knowledge base)
-   is **shared**: public-read, writes via service role only.
+   explicit in `0005`; RLS policies do not replace grants. The security-invoker
+   `observation_progress()` RPC repeats the caller-owned predicate and is executable only
+   by authenticated/service roles. `documents` (knowledge base) is **shared**:
+   public-read, writes via service role only.
 8. **Versions: latest stable, transparently.** Resolved to Next 16 / AI SDK v6 (the plan
    said Next 15). Flagged in `apps/web/README.md` with a pin-to-15 command. ESLint pinned
    to **9** because eslint-config-next 16's flat config breaks on ESLint 10.
@@ -324,17 +328,25 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 |---|---|---|---|---|---|---|
 | CN 806760 | (ratio check) | SQM 20.6 vs 18.53 | broadband | 6.7x time ratio | `2.512**2.07 = 6.73x` | PASS (executable — test 1) |
 | CN 803525-adjacent | (ratio check) | same sky | f/8 vs f/4 | 4x time ratio | `optics: 4.0x` | PASS (executable — test 6) |
-| CN 806760 #17 | emission neb | B9 half-moon vs B4 moonless | 3nm Ha | “no discernible difference” | equal by construction (calibration anchor) | fill in |
-| CN 868697 | faint dust (Cocoon) | B8/9 | f/4 broadband | 17.5h “just starting to show dust” | fill in | fill in |
-| CN 868697 | typical target | B4 | f/4.5 broadband | ~6h acceptable minimum | fill in | fill in |
+| CN 806760 #17 | emission neb | B9 half-moon vs B4 moonless | 3nm Ha | “no discernible difference” | both 3.2–6.3 h at f/5; 1.584929× multiplier | CALIBRATION identity; qualitatively consistent, not independent validation |
+| CN 868697 | faint dust (Cocoon) | B8/9 | f/4 broadband | 17.5h “just starting to show dust” | B8 305.1–610.2 h; B9 964.8–1929.7 h | INCONCLUSIVE: different quality threshold + class/SQM ambiguity; large mismatch preserved |
+| CN 868697 | typical target | B4 | f/4.5 broadband | ~6h acceptable minimum | supported-kind envelope 1.3–15.4 h; default 2.6–5.1 h | INCONCLUSIVE: target kind and subjective threshold unspecified |
 
-The first two identities are measured executable checks; unmeasured cells remain `fill in`
-for human review. Class-midpoint estimates carry up to ±half-band uncertainty: Bortle 4
+The first two identities are measured executable checks. The three community rows were
+reconciled on 2026-07-15 without changing constants; the last two remain explicitly
+inconclusive rather than manufactured PASS/FAIL verdicts. Class-midpoint estimates carry
+up to ±half-band uncertainty: Bortle 4
 alone spans 1.0 mag, about 2.5× time. The SQM sidecar/override avoids that discretization,
 though named-city readings remain resolution-limited at 0.25°. For row 3, colloquial
 “Bortle 9” likely means SQM around 17.5–18 rather than the open-ended class representative
 15.5. At SQM 18.0, derived mono-NB gives `1.31×` versus broadband-B4 `1.58×`—mono is
 slightly ahead, still consistent with “no discernible difference.”
+
+The dated evidence and dual-NB source review are in
+`docs/evidence/2026-07-15-p2-evidence.md`. No reviewed source supplied a controlled,
+equal-quality time ratio across measured sky brightness for a dual-narrowband filter, so
+`dual_nb=0.30` remains a labelled unanchored interpolation. These rows do not support
+marketing the estimator as numerically validated.
 
 ### `bortle/` (offline, O(1))
 - `calibration.py` is the **single Bortle↔SQM authority**. It owns
@@ -412,7 +424,12 @@ slightly ahead, still consistent with “no discernible difference.”
 ### `datasources/planning.py`
 - `parse_when(str|None)->Time|None`: None/empty→None; date-only → append `T12:00:00`
   (UTC, biases to upcoming evening); full datetime passthrough; bad → `ValueError`.
-- `dark_window(lat,lon,when=None)` → astronomical dusk→dawn + moon illumination.
+- `dark_window(lat,lon,when=None)` normally returns astronomical dusk→dawn + Moon
+  illumination. If Astroplan returns a masked twilight, a 15-minute solar-altitude sample
+  classifies the next 24 hours: Sun always above −18° raises
+  `NoAstronomicalDarknessError`; Sun always at/below −18° returns a bounded 24-hour
+  `DarkWindow(status="continuous_astronomical_darkness")`. Expected polar Astroplan
+  warnings are suppressed, but an unclassified masked twilight remains an error.
 - `conditions_for(obj,lat,lon,window,bortle)` → samples altitude over the night
   (20-min grid), peak alt + hours-above-floor + moon sep at peak. Fixed targets use
   J2000 coordinates; moving bodies use `get_body` across the time grid and again at
@@ -429,7 +446,8 @@ slightly ahead, still consistent with “no discernible difference.”
   With no f-ratio its payload remains unchanged. With gear, sky is resolved once using
   user SQM → sidecar → class precedence, top-level `sky_sqm/sky_source` are added, and
   every row gains low/high hours, filter mismatch, and budget applicability using pure
-  C1 math without another astropy calculation.
+  C1 math without another astropy calculation. Normal-night payloads remain unchanged;
+  continuous polar darkness adds `dark_window_status`.
 - `target_detail(name,lat,lon,when=None)` → same row + dark_hours/moon/bortle. Shared
   `resolve_target` returns local fixed/moving targets first, then uses Simbad for supported
   names. `TargetNotFound`, `UnsupportedTarget`, and `UpstreamResolutionError` distinguish
@@ -438,6 +456,7 @@ slightly ahead, still consistent with “no discernible difference.”
 - `project_target(...)` resolves Bortle once, prefers user SQM over the sidecar
   over the Bortle-class crosswalk, records that source, and projects one conditions sample
   per consecutive dusk (duplicate dusk windows are skipped). Each night exposes UTC
+  dusk/dawn and, only for continuous polar darkness, the explicit bounded-window status.
   dusk/dawn, dark/visible/usable hours, and lunar conditions; the response also exposes
   budget range, cumulative low/high finishing nights, horizon, and max-usable date.
   Planets keep the nightly visibility list while budget fields remain null.
@@ -540,6 +559,13 @@ slightly ahead, still consistent with “no discernible difference.”
   through `/api/project`, never in the rank loop, and show hours, completion sessions,
   best night, planet lucky-imaging guidance, and a dependency-free 30-night usable-hours
   strip. Gearless requests and the anonymous five-column plan remain unchanged.
+- Track C4(d) progress UI (2026-07-15): a saved-session log accepts optional non-negative
+  whole integration minutes. Signed-in gear-aware plans server-load owner totals through
+  `observation_progress()`, aggregate normalized target names, and show recorded minutes/
+  hours plus percent of the modeled low/high range. Successful logs update the visible
+  total immediately; session detail retains the per-observation minutes. Null legacy rows
+  remain valid and excluded from totals. Anonymous and gearless plan tables retain their
+  prior shapes.
 
 ### Supabase migrations
 - `0001`: `sessions(id,user_id,title,lat,lon,planned_for,created_at)`,
@@ -563,9 +589,13 @@ slightly ahead, still consistent with “no discernible difference.”
   constrained backend/status values, a short failure reason, and a nonselectable random
   completion capability—no generic JSON or content. The capability stays inside the server
   route so an authenticated browser cannot overwrite a real request's accounting row.
-  Run order: 0001 → 0002 → 0003 → 0004 → 0005 → 0006. CI replays the full chain
+- `0007`: nullable, non-negative `logged_observations.integration_minutes` plus the stable
+  security-invoker `observation_progress()` RPC. It sums only the current `auth.uid()` and
+  non-null minutes by target; execute is revoked from public/anon and granted to
+  authenticated/service roles.
+  Run order: 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007. CI replays the full chain
   in PostgreSQL with pgvector, reapplies `0005` to prove idempotency, tests owner CRUD and
-  cross-user/session denial, then tests chat quota, usage completion, and cross-user denial.
+  cross-user/session denial, then tests chat quota/usage and observation-progress isolation.
 
 ### Eval harness numbers (offline, deterministic stand-ins)
 ```
@@ -599,6 +629,25 @@ about 5.5 percentage points, MRR by about 0.20, and nDCG@5 by about 0.19. It imp
 hybrid recall@3 but falls below raw hybrid on MRR and nDCG@5. Per rule 3, BGE remains an
 explicit opt-in and the production Cohere → LLM → pass-through default is unchanged.
 
+### P2 live grown-corpus A/B (684 rows, 19 targets, 2026-07-15)
+```
+retriever/subgroup                 hit@1  recall@3  MRR   nDCG@5
+raw hybrid — all                    0.39      0.44  0.42     0.42
+raw hybrid — planets                0.50      0.75  0.63     0.66
+LLM rerank — all                    0.44      0.63  0.55     0.59
+LLM rerank — planets                1.00      1.00  1.00     1.00
+```
+The 18-case dataset adds separately labelled Jupiter, Saturn, Mars, and Venus cases. The
+runner measures corpus rows/targets before live scoring and now keeps BGE behind
+`RUN_BGE_EVALS=1`; both production arms share one first-stage snapshot per query. LLM
+reranking remains the supported baseline: all-case recall@3 improved by 0.19 and planet
+recall@3 by 0.25, although exact-query hit@1 fell from 0.63 to 0.38. The assumed
+253-row corpus was stale: a separate read-only check measured 459 exact-unique
+target/bibcode/content rows and 225 exact duplicate rows. No production rows were changed;
+the duplicate ingestion/idempotency issue prevents treating this as a clean longitudinal
+comparison. Full output and evidence conditions are recorded in
+`docs/evidence/2026-07-15-p2-evidence.md`.
+
 ### Faithfulness eval
 - `splitClaims(answer)` splits sentence-level claims; `faithfulnessScore` returns the
   supported-claim fraction (empty claim list = 1). `MockJudge` is the deterministic
@@ -628,12 +677,12 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-15: **90 unit tests pass**, 16 deselected as
+- **Current status:** API verified 2026-07-15: **99 unit tests pass**, 19 deselected as
   integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. Current
   web source passes typecheck, lint, and the 14-route production build. No-key Vitest:
-  **79 passed + 11 live cases skipped** (six canned faithfulness + five agent trajectory).
+  **83 passed + 11 live cases skipped** (six canned faithfulness + five agent trajectory).
   Live B3 remains **6/6 passed**; the new live trajectory gate is **5/5 passed** after
-  the corpus-only response policy. The B2 live A/B is recorded above (§5 item 6).
+  the corpus-only response policy. The P2 live 18-case A/B is recorded above.
 - **How to verify locally**:
   - API: from `apps/api`, `PYTHONPATH=src python -m pytest -m "not integration"`, plus
     `ruff check .`, `ruff format --check .`, `mypy src`.
@@ -684,14 +733,16 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**Repository gates are green through item 19.** Track C3 live closeout was reopened by
+**Repository gates are green through item 21.** Track C3 live closeout was reopened by
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
 application acceptance in item 17. Item 19's repository implementation, intended-platform
 proof, and multi-worker distributed projection guard are verified. Migration `0006` and its
 hosted acceptance are verified. A real user magic-link session also passed signed-in
 production chat, accounting, structured-log, and reload-persistence acceptance; it was not
-replaced with an agent-created auth fixture. C4(d) remains an explicitly deferred stretch
-and the Track C follow-up backlog below remains open where marked:
+replaced with an agent-created auth fixture. Item 21 implements C4(d), applies hosted
+migration `0007`, closes the polar failure mode, and records the current retrieval/
+calibration evidence. Per-user personalization, city-grid regeneration, dark-nebula
+taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked below:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -1072,6 +1123,41 @@ and the Track C follow-up backlog below remains open where marked:
     because Turbopack was not permitted to bind its internal local port; the required
     unsandboxed rerun compiled successfully.
 
+21. **P2 — retention loop and evidence closeout (Repository + hosted database verified
+    2026-07-15; production artifact acceptance pending).** Migration `0007` adds nullable,
+    non-negative observation integration minutes and an authenticated owner-scoped progress
+    RPC. Saved-session logging accepts optional whole minutes; signed-in gear-aware plans
+    show persisted per-target totals and modeled-range percentages, while legacy null rows,
+    anonymous plans, and gearless payloads remain valid. Hosted migration application
+    succeeded. A rollback-wrapped production-database acceptance inserted two synthetic
+    auth owners, proved 120-minute owner aggregation, negative-minute rejection, and
+    cross-user invisibility, then rolled back all fixtures. The final schema/privilege query
+    returned `true` for the column, constraint, authenticated execute grant, and anon revoke.
+
+    Polar masked twilight no longer becomes a generic 502: no astronomical darkness raises
+    a structured 422 product state, while continuous polar darkness returns a labelled,
+    bounded 24-hour window. Pure classifier, router mapping, North-Pole solstice, and normal
+    payload regression coverage are present. The web labels continuous darkness and explains
+    the bounded projection window.
+
+    The live 18-case retrieval A/B measured **684 rows / 19 targets**, correcting the stale
+    253-row assumption; **225 rows are exact duplicates**. Raw versus LLM-reranked all-case
+    recall@3 was **0.44 → 0.63**, and the four-planet subgroup was **0.75 → 1.00**. BGE was
+    not run and remains opt-in. The dual-NB review found no controlled equal-quality time
+    ratio, so `0.30` remains unanchored. The two remaining community validation rows now
+    expose their current model outputs and inconclusive dispositions; the Cocoon class-only
+    output is 305.1–610.2 h at B8 and 964.8–1929.7 h at B9 rather than being tuned toward
+    the report. Per-user calibration remains blocked on real outcome data and an approved
+    sufficiency threshold; finer city-core grids remain deferred. Evidence and source
+    limitations are preserved in `docs/evidence/2026-07-15-p2-evidence.md`.
+
+    Local repository gates are green: API Ruff/format/mypy plus **99 passed / 19
+    deselected**; focused polar Astropy integration cases passed; web typecheck/ESLint plus
+    **83 passed / 11 skipped** and a successful **14-route** optimized build. Initial
+    sandboxed `uv sync` and Turbopack build attempts failed on cache/port permissions; the
+    required writable-cache and approved worker-capability reruns passed. No dependency,
+    Bortle/SQM artifact, retrieval-default, or budget constant changed.
+
 ### P1 production credential follow-up (deferred 2026-07-15)
 
 Credential values are intentionally not recorded here, elsewhere in the repository, or in
@@ -1093,10 +1179,11 @@ task output. These items are documentation-only until the maintainer explicitly 
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 
-- **Polar dark-window handling (open, low priority):** replace predictable 502 responses
-  near the poles with a structured continuous-darkness / no-dark-window result.
-- **Grown-corpus retrieval evaluation (open):** rerun hybrid versus LLM rerank on the
-  253-chunk / 19-target corpus and add planet-labelled cases before making new claims.
+- **Polar dark-window handling (done 2026-07-15):** no-dark dates return structured 422;
+  continuous darkness returns an explicit bounded 24-hour planning window.
+- **Grown-corpus retrieval evaluation (done 2026-07-15):** the 18-case raw/LLM run includes
+  four planet-labelled cases. Live production measured 684 rows / 19 targets rather than
+  253; 225 exact duplicate rows are preserved as a new ingestion/idempotency follow-up.
 - **Moon-separation warning noise (done 2026-07-12):** compare target and Moon in one
   GCRS frame. Fixed- and moving-target integration tests now fail on recurrence.
 - **Python environment parity (verified; local cleanup optional):** the full gate passes
@@ -1104,10 +1191,15 @@ task output. These items are documentation-only until the maintainer explicitly 
   recreate it only if exact day-to-day CI parity is desired.
 - **Dark-nebula taxonomy (open):** split silhouettes on emission from broadband dust
   before expanding the catalog, so filter coupling no longer depends on the IC434 case.
-- **City-core SQM resolution (open):** retain the measured-SQM override as the practical
-  mitigation; investigate a finer sidecar only if evidence justifies the data cost.
-- **Per-user calibration (blocked on C4(d)):** use logged integration minutes and rated
-  outcomes to personalize base-hour estimates only after progress capture exists.
+- **City-core SQM resolution (deliberately deferred 2026-07-15):** retain measured-SQM as
+  the practical mitigation; propose a provenance/data plan only after usage evidence.
+- **Per-user calibration (blocked on outcome evidence):** C4(d) minutes/progress capture is
+  implemented, but minutes plus the existing rating are not yet sufficient quality labels.
+  Define no sufficiency threshold and personalize nothing until real non-synthetic outcomes
+  exist and the maintainer approves the threshold.
+- **Corpus ingestion idempotency (open 2026-07-15):** production has 684 document rows but
+  only 459 exact-unique target/bibcode/content tuples. Diagnose/reconcile the 225 exact
+  duplicates in a separately approved data mutation; retrieval-time dedup remains active.
 
 **Integration tests that need live services** (run manually with keys, excluded from CI):
 `test_datasources_integration.py` (CDS/Simbad + ADS), `test_planning_integration.py`
@@ -1120,7 +1212,7 @@ ones fail purely due to blocked network — expected.
 ## 6. How to run the whole thing (live)
 
 ```bash
-# 1. Supabase: create project; run migrations 0001→0002→0003→0004→0005→0006;
+# 1. Supabase: create project; run migrations 0001→0002→0003→0004→0005→0006→0007;
 #    enable email auth;
 #    allow http://localhost:3000/auth/callback
 #    SUPABASE_URL = bare project URL (no /rest/v1). A 42501 means migration 0005 is
@@ -1142,7 +1234,8 @@ cp apps/web/.env.example apps/web/.env.local             # Supabase URL/anon + O
 # then set RERANK_BACKEND=bge. First use downloads/caches the quantized public model.
 pnpm --filter @astroscout/web dev                        # http://localhost:3000
 ```
-`/plan` works without auth; sign-in (magic link) unlocks save/log and `/chat`. Chat also
-needs migration `0006`, `OPENAI_API_KEY`, and an ingested corpus for grounded answers.
+`/plan` works without auth; sign-in (magic link) unlocks save/log/progress and `/chat`.
+Chat needs migration `0006`; recorded progress needs `0007`; grounded answers need
+`OPENAI_API_KEY` and an ingested corpus.
 Use `docs/live-acceptance.md` as the single release-candidate journey; record new live
 results as dated evidence and preserve failed checks as corrections.

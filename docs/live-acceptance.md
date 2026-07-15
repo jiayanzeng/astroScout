@@ -33,12 +33,12 @@ Record:
 | deployed commit | |
 | deployment/origin | |
 | browser and device IANA zone | |
-| Supabase migration head (expected `0006_chat_usage_limits.sql`) | |
+| Supabase migration head (expected `0007_observation_progress.sql`) | |
 | operator | |
 
 Preconditions:
 
-- migrations `0001` through `0006` are applied in order;
+- migrations `0001` through `0007` are applied in order;
 - email magic-link auth allows this origin's `/auth/callback`;
 - the deployed web service has the public Supabase URL/publishable key and server-only
   OpenAI configuration, with no Supabase service-role key;
@@ -92,9 +92,14 @@ past run's M42 hours or best-night date as the pass condition.
    hours-needed range, completion guidance, a best night, and a 30-night usable-hours
    strip. A planet projection may have nights but no integration budget; that is expected.
 3. Close the projection card, select **Save session**, and confirm **Session saved**.
-4. Select **Log** on M42 once. Open `/sessions`, then open the newly created session.
-5. Record the `/sessions/<id>` URL. Confirm the saved coordinates and the M42 observation
+4. Enter `120` integration minutes and select **Log** on M42 once. Verify the plan row
+   immediately reports two logged hours and progress against the modeled range.
+5. Open `/sessions`, then open the newly created session. Confirm the observation shows
+   `120 min integration`.
+6. Record the `/sessions/<id>` URL. Confirm the saved coordinates and the M42 observation
    remain after reloading both the list and detail page.
+7. Return to `/plan`, select the same gear, rank again, and confirm the aggregated M42
+   progress survives navigation/reload.
 
 The current product fixes the title to `Night plan @ <lat>, <lon>` and has no session
 rename/delete control. Identify the acceptance fixture by its recorded session ID and UTC
@@ -177,6 +182,19 @@ curl -sS -G -w '\nHTTP %{http_code}\n' "$BASE_URL/api/project" \
   --data-urlencode 'lon=174.76' \
   --data-urlencode 'f_ratio=5'
 
+# Polar summer: 422 with detail.code=no_astronomical_darkness.
+curl -sS -G -w '\nHTTP %{http_code}\n' "$BASE_URL/api/plan" \
+  --data-urlencode 'lat=89.9' \
+  --data-urlencode 'lon=0' \
+  --data-urlencode 'when=2026-06-21'
+
+# Polar winter: 200 with dark_window_status=continuous_astronomical_darkness and a
+# bounded 24-hour dusk_utc -> dawn_utc interval.
+curl -sS -G -w '\nHTTP %{http_code}\n' "$BASE_URL/api/plan" \
+  --data-urlencode 'lat=89.9' \
+  --data-urlencode 'lon=0' \
+  --data-urlencode 'when=2026-12-21'
+
 # No auth cookie: 401 with error.code=authentication_required.
 curl -sS -w '\nHTTP %{http_code}\n' -H 'Content-Type: application/json' \
   --data '{"messages":[],"observer":null}' "$BASE_URL/api/chat"
@@ -212,13 +230,14 @@ Complete one table; link evidence rather than pasting secrets or private content
 | gear create/reload/delete | own profile persists, then is absent | | | |
 | Auckland budgeted plan | gear/SQM fields and device-zone label | | | |
 | M42 projection | bounded 30-night detail | | | |
-| saved session/observation | list/detail survive reload | | | |
+| saved session/observation | 120 min + aggregate survive reload | | | |
 | planning chat | `planNight`, consistent observer | | | |
 | comparison chat | plan + exact M31/M42 details | | | |
 | science chat | `searchKnowledge`, title/bibcode citations | | | |
 | chat reload/navigation/clear | validated text only; clear works | | | |
 | accounting/log privacy | numeric/content-free completion | | | |
 | validation and target errors | 400/404/422/401 as specified | | | |
+| polar summer/winter | structured 422 / labelled bounded 200 | | | |
 | M4/Moon/Simbad success | 200/200/200 | | | |
 | shared projection limit | six 400, then 429 | | | |
 

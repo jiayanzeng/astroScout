@@ -16,7 +16,13 @@ export type LoggedObservation = {
   score: number | null;
   rating: "poor" | "marginal" | "good" | null;
   notes: string | null;
+  integration_minutes: number | null;
   observed_at: string;
+};
+
+export type ObservationProgress = {
+  target: string;
+  integration_minutes: number;
 };
 
 export type GearProfile = {

@@ -36,6 +36,18 @@ begin
   ) then
     raise exception 'authenticated lacks EXECUTE on public.hybrid_search';
   end if;
+
+  if not has_function_privilege(
+    'authenticated',
+    'public.observation_progress()',
+    'EXECUTE'
+  ) then
+    raise exception 'authenticated lacks EXECUTE on public.observation_progress';
+  end if;
+
+  if has_function_privilege('anon', 'public.observation_progress()', 'EXECUTE') then
+    raise exception 'anon unexpectedly has EXECUTE on public.observation_progress';
+  end if;
 end
 $$;
 
@@ -64,15 +76,48 @@ insert into public.gear_profiles (
 );
 
 insert into public.logged_observations (
-  id, session_id, user_id, target, score, rating
+  id, session_id, user_id, target, score, rating, integration_minutes
 ) values (
   'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   '11111111-1111-4111-8111-111111111111',
   'M42',
   0.9,
-  'good'
+  'good',
+  120
 );
+
+do $$
+declare
+  negative_minutes_blocked boolean := false;
+  progress_minutes bigint;
+begin
+  begin
+    insert into public.logged_observations (
+      session_id, user_id, target, integration_minutes
+    ) values (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      'M31',
+      -1
+    );
+  exception
+    when check_violation then
+      negative_minutes_blocked := true;
+  end;
+
+  if not negative_minutes_blocked then
+    raise exception 'negative integration minutes were not blocked';
+  end if;
+
+  select integration_minutes into progress_minutes
+  from public.observation_progress()
+  where target = 'M42';
+  if progress_minutes <> 120 then
+    raise exception 'owner progress returned %, expected 120', progress_minutes;
+  end if;
+end
+$$;
 
 update public.gear_profiles
 set f_ratio = 4.8
@@ -114,6 +159,11 @@ begin
   select count(*) into visible_count from public.logged_observations;
   if visible_count <> 0 then
     raise exception 'cross-user observation read was not blocked';
+  end if;
+
+  select count(*) into visible_count from public.observation_progress();
+  if visible_count <> 0 then
+    raise exception 'cross-user progress aggregation was not blocked';
   end if;
 
   update public.gear_profiles

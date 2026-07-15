@@ -27,6 +27,11 @@ process-local concurrency and request-rate guards. The production Vercel origin 
 shared WAF limit of six `/api/project` requests per IP per 60 seconds; a self-hosted
 multi-worker deployment must provide an equivalent gateway-level limit.
 
+Polar darkness is also explicit. A date on which the Sun never reaches astronomical
+darkness returns structured 422 `no_astronomical_darkness`; continuous polar night uses a
+labelled, bounded 24-hour planning window instead of passing Astropy's masked twilight
+value into the ordinary dusk/dawn flow. Normal-night response shapes are unchanged.
+
 ## Data sources
 
 | source | adapter | needs token | notes |

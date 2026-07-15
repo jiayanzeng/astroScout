@@ -26,8 +26,9 @@ relay endpoints are supported via `OPENAI_BASE_URL` (v0.6.1).
   Fusion (`hybrid_search` RPC), then a **cross-encoder rerank** (Cohere or LLM) over
   the top candidates — robust to both exact identifiers and paraphrase.
 - **Auth + persistence** — Supabase magic-link auth, Postgres + row-level security,
-  saved **sessions** and logged **observations**; chat restores a validated, text-only
-  browser-local history with an explicit Clear action and privacy policy.
+  saved **sessions** and logged **observations** with optional integration minutes and
+  owner-scoped target progress; chat restores a validated, text-only browser-local history
+  with an explicit Clear action and privacy policy.
 - **Web UI** — `/plan` rankings and gear-aware budgets, on-demand 30-night
   projections, saved-session list/detail with observation logging, and the authenticated
   `/chat` copilot.
@@ -52,7 +53,7 @@ Vercel AI SDK v6 · Supabase (auth + Postgres + pgvector + RLS) · OpenAI embedd
 
 ```bash
 # 1. Supabase — see supabase/README.md
-#    create a project, run migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006,
+#    create a project, run migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006 -> 0007,
 #    then enable email auth
 #    NOTE: SUPABASE_URL must be the bare project URL (https://<ref>.supabase.co) —
 #    do NOT append /rest/v1; the store client adds the REST path itself.

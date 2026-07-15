@@ -26,6 +26,10 @@ const KEYWORDS: Record<string, string[]> = {
   M8: ["lagoon", "emission", "nebula", "sagittarius"],
   M20: ["trifid", "emission", "nebula", "sagittarius"],
   M104: ["sombrero", "galaxy", "edge", "dust", "lane"],
+  Jupiter: ["jupiter", "planet", "largest", "cloud", "bands", "red", "spot"],
+  Saturn: ["saturn", "planet", "rings", "ring", "icy"],
+  Mars: ["mars", "planet", "red", "polar", "caps", "thin", "atmosphere"],
+  Venus: ["venus", "planet", "bright", "cloud", "greenhouse", "atmosphere"],
 };
 
 // Descriptive blurbs (the "documents"). Dense signal + reranker read these.
@@ -45,6 +49,10 @@ const BLURBS: Record<string, string> = {
   M8: "A bright cloud of gas in Sagittarius collapsing into clusters of infant stars toward the galactic center.",
   M20: "A colorful star-forming cloud in Sagittarius where young stars are condensing out of collapsing gas.",
   M104: "An edge-on spiral galaxy, a distant island universe crossed by a dark lane of dust.",
+  Jupiter: "The largest planet in the Solar System, with banded clouds and the Great Red Spot.",
+  Saturn: "A giant planet surrounded by a prominent system of mostly icy rings.",
+  Mars: "The red planet, with polar caps and a thin carbon-dioxide atmosphere.",
+  Venus: "A bright cloud-covered planet with a dense atmosphere and runaway greenhouse conditions.",
 };
 
 const contentFor = (target: string): string => `${target} — ${BLURBS[target] ?? ""}`;

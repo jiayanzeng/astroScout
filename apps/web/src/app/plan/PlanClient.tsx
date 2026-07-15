@@ -24,7 +24,12 @@ import {
   type ObserverContext,
   type ObserverLocationSource,
 } from "@/lib/observer-context";
-import type { GearProfile } from "@/lib/supabase/types";
+import {
+  aggregateIntegrationMinutes,
+  formatIntegrationProgress,
+  targetProgressKey,
+} from "@/lib/progress";
+import type { GearProfile, ObservationProgress } from "@/lib/supabase/types";
 
 const SELECTED_GEAR_STORAGE_KEY = "astroscout:selected-gear-profile";
 const SKY_SQM_STORAGE_KEY = "astroscout:sky-sqm";
@@ -52,7 +57,13 @@ function bortleBadgeClass(bortle: number): string {
   return "border-rose-400/20 bg-rose-500/15 text-rose-300";
 }
 
-function LoadingRows({ showBudget }: { showBudget: boolean }) {
+function LoadingRows({
+  showBudget,
+  showProgress,
+}: {
+  showBudget: boolean;
+  showProgress: boolean;
+}) {
   return Array.from({ length: 5 }, (_, index) => (
     <tr key={index} className="border-b last:border-0">
       <td className="py-3 pr-3">
@@ -75,6 +86,11 @@ function LoadingRows({ showBudget }: { showBudget: boolean }) {
           <div className="bg-muted h-4 w-20 animate-pulse rounded" />
         </td>
       )}
+      {showProgress && (
+        <td className="hidden py-3 pr-3 md:table-cell">
+          <div className="bg-muted h-4 w-32 animate-pulse rounded" />
+        </td>
+      )}
       {showBudget && (
         <td className="py-3">
           <div className="bg-muted h-7 w-16 animate-pulse rounded" />
@@ -88,10 +104,14 @@ export function PlanClient({
   signedIn,
   initialGearProfiles,
   initialGearProfilesError,
+  initialObservationProgress,
+  initialObservationProgressError,
 }: {
   signedIn: boolean;
   initialGearProfiles: GearProfile[];
   initialGearProfilesError: string | null;
+  initialObservationProgress: ObservationProgress[];
+  initialObservationProgressError: string | null;
 }) {
   const [lat, setLat] = useState("-36.85");
   const [lon, setLon] = useState("174.76");
@@ -108,6 +128,11 @@ export function PlanClient({
   const [projectError, setProjectError] = useState<string | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [progressMinutes, setProgressMinutes] = useState<Record<string, number>>(() =>
+    aggregateIntegrationMinutes(initialObservationProgress),
+  );
+  const [integrationInputs, setIntegrationInputs] = useState<Record<string, string>>({});
+  const [lastLoggedTarget, setLastLoggedTarget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -313,19 +338,44 @@ export function PlanClient({
 
   function log(target: RankedTarget) {
     if (!sessionId) return;
+    const rawMinutes = (integrationInputs[target.name] ?? "").trim();
+    const minutes = rawMinutes ? Number(rawMinutes) : undefined;
+    if (
+      minutes !== undefined &&
+      (!Number.isFinite(minutes) || !Number.isInteger(minutes) || minutes < 0)
+    ) {
+      setError("Integration minutes must be a non-negative whole number.");
+      return;
+    }
+    setError(null);
+    setLastLoggedTarget(null);
     startTransition(async () => {
       const result = await logObservation({
         session_id: sessionId,
         target: target.name,
         score: target.score,
         rating: target.rating,
+        ...(minutes === undefined ? {} : { integration_minutes: minutes }),
       });
-      if (result.error) setError(result.error);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      if (minutes !== undefined) {
+        const key = targetProgressKey(target.name);
+        setProgressMinutes((current) => ({
+          ...current,
+          [key]: (current[key] ?? 0) + minutes,
+        }));
+      }
+      setIntegrationInputs((current) => ({ ...current, [target.name]: "" }));
+      setLastLoggedTarget(target.name);
     });
   }
 
   const filteredTargets = plan?.targets.filter((target) => matchesKindFilter(target, kindFilter));
   const estimatesShown = plan?.sky_source !== undefined;
+  const progressShown = signedIn && estimatesShown;
 
   return (
     <div className="flex flex-col gap-6">
@@ -337,6 +387,11 @@ export function PlanClient({
           onProfilesChange={setGearProfiles}
           onSelect={selectGear}
         />
+      )}
+      {signedIn && initialObservationProgressError && (
+        <p className="text-destructive text-sm" role="alert">
+          Could not load observation progress: {initialObservationProgressError}
+        </p>
       )}
 
       <Card>
@@ -422,8 +477,12 @@ export function PlanClient({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <CardTitle>
-                    {plan.dark_hours}h dark · moon {Math.round(plan.moon_illumination * 100)}%
+                    {plan.dark_hours}h {plan.dark_window_status ? "bounded window" : "dark"} · moon{" "}
+                    {Math.round(plan.moon_illumination * 100)}%
                   </CardTitle>
+                  {plan.dark_window_status === "continuous_astronomical_darkness" && (
+                    <Badge variant="good">Continuous astronomical darkness</Badge>
+                  )}
                   <Badge className={bortleBadgeClass(plan.bortle)}>
                     Bortle {plan.bortle}: {bortleLabel(plan.bortle)}
                   </Badge>
@@ -438,6 +497,9 @@ export function PlanClient({
                   )}
                 </div>
                 <p className="text-muted-foreground mt-1 text-xs">
+                  {plan.dark_window_status === "continuous_astronomical_darkness"
+                    ? "Bounded 24-hour planning window: "
+                    : "Astronomical dusk to dawn: "}
                   <time dateTime={plan.dusk_utc} title={plan.dusk_utc}>
                     {formatLocalDateTime(plan.dusk_utc)}
                   </time>{" "}
@@ -492,13 +554,21 @@ export function PlanClient({
                         Est. hours (your sky)
                       </th>
                     )}
+                    {progressShown && (
+                      <th className="hidden py-2 pr-3 font-medium md:table-cell">
+                        Recorded progress
+                      </th>
+                    )}
                     {selectedGearProfile && <th className="py-2 font-medium" />}
-                    {sessionId && <th className="py-2 font-medium" />}
+                    {sessionId && <th className="py-2 font-medium">Record</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <LoadingRows showBudget={selectedGearProfile !== null} />
+                    <LoadingRows
+                      showBudget={selectedGearProfile !== null}
+                      showProgress={signedIn && selectedGearProfile !== null}
+                    />
                   ) : filteredTargets?.length ? (
                     filteredTargets.map((target, index) => (
                       <tr
@@ -566,6 +636,15 @@ export function PlanClient({
                             )}
                           </td>
                         )}
+                        {progressShown && (
+                          <td className="text-muted-foreground hidden py-2 pr-3 text-xs md:table-cell">
+                            {formatIntegrationProgress(
+                              progressMinutes[targetProgressKey(target.name)] ?? 0,
+                              target.hours_needed_low,
+                              target.hours_needed_high,
+                            )}
+                          </td>
+                        )}
                         {selectedGearProfile && (
                           <td className="py-2">
                             <Button
@@ -583,14 +662,35 @@ export function PlanClient({
                         )}
                         {sessionId && (
                           <td className="py-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => log(target)}
-                              disabled={pending}
-                            >
-                              Log
-                            </Button>
+                            <div className="flex min-w-40 items-center gap-1">
+                              <Input
+                                type="number"
+                                min="0"
+                                step="1"
+                                inputMode="numeric"
+                                value={integrationInputs[target.name] ?? ""}
+                                onChange={(event) =>
+                                  setIntegrationInputs((current) => ({
+                                    ...current,
+                                    [target.name]: event.target.value,
+                                  }))
+                                }
+                                placeholder="min"
+                                aria-label={`Integration minutes for ${target.name}`}
+                                className="h-8 w-20"
+                              />
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => log(target)}
+                                disabled={pending}
+                              >
+                                {pending ? "Saving…" : "Log"}
+                              </Button>
+                              {lastLoggedTarget === target.name && (
+                                <span className="text-emerald-300 text-xs">Logged</span>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -601,6 +701,7 @@ export function PlanClient({
                         colSpan={
                           5 +
                           (estimatesShown ? 1 : 0) +
+                          (progressShown ? 1 : 0) +
                           (selectedGearProfile ? 1 : 0) +
                           (sessionId ? 1 : 0)
                         }

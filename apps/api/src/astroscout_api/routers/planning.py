@@ -2,7 +2,13 @@ from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from ..budget import FilterKind, QualityTier
-from ..datasources.planning import parse_when, project_target, rank_targets, target_detail
+from ..datasources.planning import (
+    NoAstronomicalDarknessError,
+    parse_when,
+    project_target,
+    rank_targets,
+    target_detail,
+)
 from ..datasources.targets import TargetNotFound, UnsupportedTarget, UpstreamResolutionError
 from ..params import FRatio, Lat, Lon, Nights, Sqm, When
 from ..protection import ProjectionGuard
@@ -32,6 +38,8 @@ def plan_night(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         return rank_targets(lat, lon, parsed, f_ratio, filter, tier, sqm)
+    except NoAstronomicalDarknessError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail()) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
 
@@ -45,6 +53,8 @@ def plan_target(name: str, lat: Lat, lon: Lon, when: When = None) -> dict[str, o
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         return target_detail(name, lat, lon, parsed)
+    except NoAstronomicalDarknessError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail()) from exc
     except (TargetNotFound, UnsupportedTarget, UpstreamResolutionError) as exc:
         raise target_resolution_http_error(exc) from exc
     except Exception as exc:
@@ -93,6 +103,8 @@ async def plan_project(
         return await run_in_threadpool(
             project_target, name, lat, lon, f_ratio, filter, tier, parsed, nights, sqm
         )
+    except NoAstronomicalDarknessError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail()) from exc
     except (TargetNotFound, UnsupportedTarget, UpstreamResolutionError) as exc:
         raise target_resolution_http_error(exc) from exc
     except Exception as exc:

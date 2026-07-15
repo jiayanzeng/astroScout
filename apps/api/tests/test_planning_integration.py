@@ -8,6 +8,7 @@ from astropy.time import Time
 
 from astroscout_api.datasources.dso_catalog import get
 from astroscout_api.datasources.planning import (
+    NoAstronomicalDarknessError,
     conditions_for,
     dark_window,
     project_target,
@@ -23,6 +24,29 @@ def test_dark_window_has_positive_hours() -> None:
 
 
 @pytest.mark.integration
+def test_polar_summer_has_no_astronomical_darkness() -> None:
+    with pytest.raises(NoAstronomicalDarknessError):
+        dark_window(89.9, 0.0, Time("2026-06-21T12:00:00", scale="utc"))
+
+
+@pytest.mark.integration
+def test_polar_winter_returns_bounded_continuous_darkness() -> None:
+    window = dark_window(89.9, 0.0, Time("2026-12-21T12:00:00", scale="utc"))
+
+    assert window.status == "continuous_astronomical_darkness"
+    assert window.hours == pytest.approx(24.0)
+    assert 0.0 <= window.moon_illumination <= 1.0
+
+
+@pytest.mark.integration
+def test_polar_winter_rank_labels_continuous_darkness() -> None:
+    out = rank_targets(89.9, 0.0, Time("2026-12-21T12:00:00", scale="utc"))
+
+    assert out["dark_window_status"] == "continuous_astronomical_darkness"
+    assert out["dark_hours"] == 24.0
+
+
+@pytest.mark.integration
 def test_rank_returns_sorted_targets() -> None:
     out = rank_targets(-36.85, 174.76)
     targets = out["targets"]
@@ -31,6 +55,7 @@ def test_rank_returns_sorted_targets() -> None:
     assert scores == sorted(scores, reverse=True)
     assert "sky_sqm" not in out
     assert "hours_needed_low" not in targets[0]  # type: ignore[operator]
+    assert "dark_window_status" not in out
 
 
 @pytest.mark.integration

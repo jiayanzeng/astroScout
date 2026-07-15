@@ -45,6 +45,7 @@ export type NightPlan = {
   bortle: number;
   sky_sqm?: number | null;
   sky_source?: "user" | "grid" | "bortle-class";
+  dark_window_status?: "continuous_astronomical_darkness";
   targets: RankedTarget[];
 };
 
@@ -64,6 +65,7 @@ export type ProjectNight = {
   moon_separation_deg: number;
   hours_visible: number;
   usable_hours: number;
+  dark_window_status?: "continuous_astronomical_darkness";
 };
 
 export type ProjectPlan = {

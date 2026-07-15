@@ -5,6 +5,7 @@ export type EvalCase = {
   query: string;
   relevantTargets: string[];
   kind: "exact" | "semantic";
+  group?: "planet";
   referenceAnswer?: string;
 };
 
@@ -26,4 +27,10 @@ export const RETRIEVAL_DATASET: EvalCase[] = [
   { id: "ancient-swarm", query: "an ancient tightly bound swarm of hundreds of thousands of old stars", relevantTargets: ["M13"], kind: "semantic" },
   { id: "dust-silhouette", query: "a dark cloud blocking the light behind it like a shadow puppet", relevantTargets: ["IC434"], kind: "semantic" },
   { id: "baby-stars-sagittarius", query: "a cloud collapsing into infant stars toward the galactic center", relevantTargets: ["M8", "M20"], kind: "semantic" },
+
+  // planet-labelled: reported separately so DSO-heavy averages cannot hide regressions
+  { id: "planet-jupiter", query: "largest planet with cloud bands and the Great Red Spot", relevantTargets: ["Jupiter"], kind: "semantic", group: "planet" },
+  { id: "planet-saturn", query: "which world has the most prominent icy ring system?", relevantTargets: ["Saturn"], kind: "semantic", group: "planet" },
+  { id: "planet-mars", query: "the red planet with polar caps and a thin atmosphere", relevantTargets: ["Mars"], kind: "semantic", group: "planet" },
+  { id: "planet-venus", query: "bright cloud-covered planet with a runaway greenhouse atmosphere", relevantTargets: ["Venus"], kind: "semantic", group: "planet" },
 ];

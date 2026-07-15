@@ -261,6 +261,25 @@ Only after the live gear/profile path is green:
 7. Defer a finer city-core SQM grid until usage or measured-SQM data demonstrates that it
    is worth the data/provenance cost.
 
+**Implementation/evidence status (2026-07-15):** repository work is complete and hosted
+migration `0007` passed rollback-wrapped owner/cross-user acceptance. Optional non-negative
+integration minutes now feed an owner-scoped progress RPC and signed-in plan/session UI.
+Polar summer returns structured `no_astronomical_darkness`; continuous polar night uses a
+labelled bounded 24-hour window. The live 18-case retrieval A/B measured the actual corpus
+at **684 rows / 19 targets**, not 253; 225 rows are exact duplicates. LLM reranking improved
+all-case recall@3 from **0.44 to 0.63** and planet recall@3 from **0.75 to 1.00**, so the
+production baseline is unchanged and BGE remains opt-in. The dated details are in
+[`docs/evidence/2026-07-15-p2-evidence.md`](docs/evidence/2026-07-15-p2-evidence.md).
+
+The evidence pass found no controlled dual-narrowband equal-quality time ratio, so
+`dual_nb=0.30` remains explicitly unanchored. The remaining community validation rows now
+contain measured model outputs and explicit inconclusive dispositions; they do not support
+marketing numerical accuracy. Per-user calibration remains deliberately blocked until
+real non-synthetic outcomes and a maintainer-approved sufficiency threshold exist. A finer
+city-core grid remains deferred pending measured usage/provenance evidence. The 684-row
+corpus duplication itself is a newly measured ingestion/idempotency follow-up, not silently
+cleaned as part of P2.
+
 ## Suggested task sequence
 
 1. Correct `STATE.md` and land the gear grant repair migration.

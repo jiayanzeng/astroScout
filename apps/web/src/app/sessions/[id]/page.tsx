@@ -77,6 +77,11 @@ export default async function SessionDetail({
                   {o.score != null && (
                     <span className="text-muted-foreground font-mono text-xs">{o.score}</span>
                   )}
+                  {o.integration_minutes != null && (
+                    <span className="text-muted-foreground text-xs">
+                      {o.integration_minutes} min integration
+                    </span>
+                  )}
                   <span className="text-muted-foreground ml-auto text-xs">
                     {new Date(o.observed_at).toLocaleString()}
                   </span>

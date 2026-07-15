@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from astroscout_api.datasources.planning import NoAstronomicalDarknessError
 from astroscout_api.datasources.targets import (
     TargetNotFound,
     UnsupportedTarget,
@@ -100,6 +101,38 @@ def test_plan_target_maps_resolution_errors(
     )
     assert response.status_code == status
     assert response.json()["detail"]["code"] == code
+
+
+@pytest.mark.parametrize(
+    ("path", "attribute", "params"),
+    [
+        ("/plan/night", "rank_targets", {"lat": 89.9, "lon": 0}),
+        ("/plan/target", "target_detail", {"name": "M42", "lat": 89.9, "lon": 0}),
+        (
+            "/plan/project",
+            "project_target",
+            {"name": "M42", "lat": 89.9, "lon": 0, "f_ratio": 5},
+        ),
+    ],
+)
+def test_planning_routes_map_no_astronomical_darkness(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    attribute: str,
+    params: dict[str, object],
+) -> None:
+    def fail(*_args: object) -> dict[str, object]:
+        raise NoAstronomicalDarknessError
+
+    monkeypatch.setattr(planning_router, attribute, fail)
+    response = client.get(path, params=params)
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "no_astronomical_darkness",
+        "message": "The Sun does not reach astronomical darkness during this 24-hour period.",
+        "state": "no_astronomical_darkness",
+        "flow": "daylight_or_twilight_planning_required",
+    }
 
 
 @pytest.mark.parametrize("name", ["M4", "Alpha Centauri"])

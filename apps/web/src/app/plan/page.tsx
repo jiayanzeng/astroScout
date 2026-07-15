@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { PlanClient } from "@/app/plan/PlanClient";
-import type { GearProfile } from "@/lib/supabase/types";
+import type { GearProfile, ObservationProgress } from "@/lib/supabase/types";
 
 export default async function PlanPage() {
   const supabase = await createClient();
@@ -11,13 +11,20 @@ export default async function PlanPage() {
   } = await supabase.auth.getUser();
   let gearProfiles: GearProfile[] = [];
   let gearProfilesError: string | null = null;
+  let observationProgress: ObservationProgress[] = [];
+  let observationProgressError: string | null = null;
   if (user) {
-    const { data, error } = await supabase
-      .from("gear_profiles")
-      .select("id,user_id,name,f_ratio,filter_kind,created_at")
-      .order("created_at", { ascending: false });
-    gearProfiles = (data ?? []) as GearProfile[];
-    gearProfilesError = error?.message ?? null;
+    const [gearResult, progressResult] = await Promise.all([
+      supabase
+        .from("gear_profiles")
+        .select("id,user_id,name,f_ratio,filter_kind,created_at")
+        .order("created_at", { ascending: false }),
+      supabase.rpc("observation_progress"),
+    ]);
+    gearProfiles = (gearResult.data ?? []) as GearProfile[];
+    gearProfilesError = gearResult.error?.message ?? null;
+    observationProgress = (progressResult.data ?? []) as ObservationProgress[];
+    observationProgressError = progressResult.error?.message ?? null;
   }
 
   return (
@@ -40,6 +47,8 @@ export default async function PlanPage() {
         signedIn={!!user}
         initialGearProfiles={gearProfiles}
         initialGearProfilesError={gearProfilesError}
+        initialObservationProgress={observationProgress}
+        initialObservationProgressError={observationProgressError}
       />
     </main>
   );

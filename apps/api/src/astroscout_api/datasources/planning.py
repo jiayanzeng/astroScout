@@ -6,16 +6,21 @@ observer's light pollution from the offline Bortle grid. All times UTC.
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import astropy.units as u
 import numpy as np
 from astroplan import Observer, moon_illumination
+from astroplan.exceptions import TargetAlwaysUpWarning, TargetNeverUpWarning
 from astropy.coordinates import (
     AltAz,
     EarthLocation,
     SkyCoord,
     get_body,
+    get_sun,
 )
 from astropy.time import Time, TimeDelta
 
@@ -71,18 +76,85 @@ class DarkWindow:
     dusk: Time  # astronomical dusk (evening)
     dawn: Time  # astronomical dawn (next morning)
     moon_illumination: float
+    status: Literal["normal", "continuous_astronomical_darkness"] = "normal"
 
     @property
     def hours(self) -> float:
         return float((self.dawn - self.dusk).to(u.hour).value)
 
 
+class NoAstronomicalDarknessError(RuntimeError):
+    """The Sun never reaches astronomical darkness in the requested day."""
+
+    def detail(self) -> dict[str, str]:
+        return {
+            "code": "no_astronomical_darkness",
+            "message": "The Sun does not reach astronomical darkness during this 24-hour period.",
+            "state": "no_astronomical_darkness",
+            "flow": "daylight_or_twilight_planning_required",
+        }
+
+
+def classify_astronomical_darkness(
+    solar_altitudes_deg: Sequence[float] | np.ndarray,
+) -> Literal["normal", "no_astronomical_darkness", "continuous_astronomical_darkness"]:
+    """Classify a 24-hour solar-altitude sample around the -18 degree boundary."""
+    altitudes = np.asarray(solar_altitudes_deg, dtype=float)
+    if altitudes.size == 0 or not np.all(np.isfinite(altitudes)):
+        raise ValueError("solar altitude samples must be finite and non-empty")
+    if np.all(altitudes > -18.0):
+        return "no_astronomical_darkness"
+    if np.all(altitudes <= -18.0):
+        return "continuous_astronomical_darkness"
+    return "normal"
+
+
+def _masked_time(value: Time) -> bool:
+    return bool(value.masked and np.any(value.mask))
+
+
+def _polar_darkness_state(
+    location: EarthLocation, t: Time
+) -> Literal["normal", "no_astronomical_darkness", "continuous_astronomical_darkness"]:
+    samples = t + TimeDelta(np.linspace(0.0, 24.0, 97) * u.hour)
+    sun_altitudes = get_sun(samples).transform_to(AltAz(obstime=samples, location=location)).alt.deg
+    return classify_astronomical_darkness(sun_altitudes)
+
+
 def dark_window(lat: float, lon: float, when: Time | None = None) -> DarkWindow:
     """Astronomical-night window following `when` (default: now)."""
     obs = _observer(lat, lon)
     t = when or Time.now()
-    dusk = obs.twilight_evening_astronomical(t, which="next")
-    dawn = obs.twilight_morning_astronomical(dusk, which="next")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", TargetAlwaysUpWarning)
+        warnings.simplefilter("ignore", TargetNeverUpWarning)
+        dusk = obs.twilight_evening_astronomical(t, which="next")
+    if _masked_time(dusk):
+        state = _polar_darkness_state(obs.location, t)
+        if state == "no_astronomical_darkness":
+            raise NoAstronomicalDarknessError
+        if state == "continuous_astronomical_darkness":
+            return DarkWindow(
+                dusk=t,
+                dawn=t + TimeDelta(24 * u.hour),
+                moon_illumination=float(moon_illumination(t)),
+                status=state,
+            )
+        raise RuntimeError("astronomical twilight was masked despite a normal solar-altitude day")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", TargetAlwaysUpWarning)
+        warnings.simplefilter("ignore", TargetNeverUpWarning)
+        dawn = obs.twilight_morning_astronomical(dusk, which="next")
+    if _masked_time(dawn):
+        state = _polar_darkness_state(obs.location, dusk)
+        if state == "continuous_astronomical_darkness":
+            return DarkWindow(
+                dusk=dusk,
+                dawn=dusk + TimeDelta(24 * u.hour),
+                moon_illumination=float(moon_illumination(dusk)),
+                status=state,
+            )
+        raise RuntimeError("astronomical dawn was masked outside continuous darkness")
     return DarkWindow(dusk=dusk, dawn=dawn, moon_illumination=float(moon_illumination(dusk)))
 
 
@@ -197,6 +269,8 @@ def rank_targets(
         "bortle": bortle,
         "targets": rows,
     }
+    if window.status != "normal":
+        result["dark_window_status"] = window.status
     if f_ratio is not None:
         result.update({"sky_sqm": sky_sqm, "sky_source": sky_source})
     return result
@@ -208,12 +282,15 @@ def target_detail(name: str, lat: float, lon: float, when: Time | None = None) -
     window = dark_window(lat, lon, when)
     bortle = bortle_at(lat, lon)
     c = conditions_for(obj, lat, lon, window, bortle)
-    return {
+    result: dict[str, object] = {
         **_row(obj, c),
         "dark_hours": round(window.hours, 1),
         "moon_illumination": round(window.moon_illumination, 2),
         "bortle": bortle,
     }
+    if window.status != "normal":
+        result["dark_window_status"] = window.status
+    return result
 
 
 def project_target(
@@ -264,18 +341,19 @@ def project_target(
             )
         )
         usable_by_night.append(usable)
-        projected.append(
-            {
-                "date": str(window.dusk.utc.isot)[:10],
-                "dusk_utc": str(window.dusk.utc.isot),
-                "dawn_utc": str(window.dawn.utc.isot),
-                "dark_hours": round(window.hours, 1),
-                "moon_illumination": conditions.moon_illumination,
-                "moon_separation_deg": conditions.moon_separation_deg,
-                "hours_visible": conditions.hours_visible,
-                "usable_hours": usable,
-            }
-        )
+        projected_night: dict[str, object] = {
+            "date": str(window.dusk.utc.isot)[:10],
+            "dusk_utc": str(window.dusk.utc.isot),
+            "dawn_utc": str(window.dawn.utc.isot),
+            "dark_hours": round(window.hours, 1),
+            "moon_illumination": conditions.moon_illumination,
+            "moon_separation_deg": conditions.moon_separation_deg,
+            "hours_visible": conditions.hours_visible,
+            "usable_hours": usable,
+        }
+        if window.status != "normal":
+            projected_night["dark_window_status"] = window.status
+        projected.append(projected_night)
         previous_dusk = window.dusk
 
     best_index = max(range(len(usable_by_night)), key=usable_by_night.__getitem__)

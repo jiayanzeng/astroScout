@@ -41,6 +41,7 @@ export async function logObservation(input: {
   score: number | null;
   rating: "poor" | "marginal" | "good" | null;
   notes?: string;
+  integration_minutes?: number;
 }): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -48,9 +49,22 @@ export async function logObservation(input: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
+  if (
+    input.integration_minutes !== undefined &&
+    (!Number.isFinite(input.integration_minutes) ||
+      !Number.isInteger(input.integration_minutes) ||
+      input.integration_minutes < 0)
+  ) {
+    return { error: "Integration minutes must be a non-negative whole number" };
+  }
+
   const { error } = await supabase
     .from("logged_observations")
-    .insert({ ...input, user_id: user.id });
+    .insert({
+      ...input,
+      integration_minutes: input.integration_minutes ?? null,
+      user_id: user.id,
+    });
 
   if (error) return { error: error.message };
   revalidatePath(`/sessions/${input.session_id}`);

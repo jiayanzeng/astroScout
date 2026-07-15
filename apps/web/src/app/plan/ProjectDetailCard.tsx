@@ -34,6 +34,9 @@ export function ProjectDetailCard({
   const maxUsable = project
     ? Math.max(0.1, ...project.nights.map((night) => night.usable_hours))
     : 0.1;
+  const includesContinuousDarkness = project?.nights.some(
+    (night) => night.dark_window_status === "continuous_astronomical_darkness",
+  );
 
   return (
     <Card>
@@ -75,6 +78,12 @@ export function ProjectDetailCard({
             <p className="text-muted-foreground text-sm">
               Best projected night: <strong className="text-foreground">{project.best_night}</strong>
             </p>
+            {includesContinuousDarkness && (
+              <p className="text-muted-foreground text-xs">
+                Polar-night dates use explicit bounded 24-hour planning windows because
+                astronomical dusk and dawn do not occur.
+              </p>
+            )}
             <div>
               <div
                 className="flex h-20 items-end gap-1"
