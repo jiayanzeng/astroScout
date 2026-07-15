@@ -686,9 +686,9 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 **Repository gates are green through item 19.** Track C3 live closeout was reopened by
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
 application acceptance in item 17. Item 19's repository implementation is verified, while
-its hosted migration and intended-platform proof remain deployment closeout work. C4(d)
-remains an explicitly deferred stretch and the Track C follow-up backlog below remains open
-where marked:
+its intended-platform proof and multi-worker distributed projection guard remain deployment
+closeout work. Migration `0006` and its hosted acceptance are verified. C4(d) remains an
+explicitly deferred stretch and the Track C follow-up backlog below remains open where marked:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -954,8 +954,9 @@ where marked:
     ESLint clean, no-key Vitest **61 passed + 11 skipped**, live agent **5/5**, and the
     **13-route** production build passed. No dependencies or committed data changed.
 
-19. **P1 — production reliability and error semantics (Repository implementation done
-    2026-07-15; deployment closeout open).** Target resolution now has explicit
+19. **P1 — production reliability and error semantics (Repository + hosted database +
+    intended-runtime local proof done 2026-07-15; live hosting closeout open).** Target
+    resolution now has explicit
     `TargetNotFound`, `UnsupportedTarget`, and `UpstreamResolutionError` categories mapped
     by both planning and visibility routers to 404, structured 422, and 502 respectively.
     `AAA` exercises the missing-name path; M4 resolves locally and Alpha Centauri preserves
@@ -987,11 +988,22 @@ where marked:
     API Ruff/format/mypy plus **90 passed / 16 deselected**; web typecheck/ESLint plus
     **79 passed + 11 skipped** and a **14-route** optimized production build. Local
     `next start` artifact smoke returned `/plan` 200, `/privacy` 200, invalid proxy 400,
-    and anonymous chat 401. The current environment has no local PostgreSQL, so the `0006`
-    SQL acceptance is executable CI coverage, not a locally observed database pass. The
-    hosted project has not received `0006`, and the intended cloud hosting environment was
-    not exercised because no deployment configuration/CLI/credentials are present; those
-    two deployment proofs must remain open rather than being inferred from local `next start`.
+    and anonymous chat 401. The current environment has no local PostgreSQL, but migration
+    `0006` was applied successfully to the configured hosted Supabase project on 2026-07-15.
+    Its rollback-wrapped live acceptance passed atomic minute quota, completion-capability
+    enforcement, numeric usage recording, completion-token column denial, and cross-user
+    RLS visibility without retaining fixture rows. Root `vercel.json` now defines one
+    Vercel Services deployment: a public Next.js service receives a deployment-aware
+    private binding to the otherwise unexposed FastAPI service, whose function duration is
+    capped at 60 seconds. Vercel CLI 56.2.0 local-runtime proof started both detected
+    services, then measured `/api/plan` 200 with 21 targets, M4 visibility 200, a two-night
+    M4 projection 200, missing latitude 400, and anonymous chat 401 through the public web
+    surface. Ruff excludes Vercel's generated `.vercel` runtime rather than linting vendored
+    code; the full repository gate remained API Ruff/format/mypy + **90 passed / 16
+    deselected**, and web typecheck/ESLint + **79 passed / 11 skipped** + the **14-route**
+    optimized build. A real production deployment, its environment variables, authenticated
+    traffic, and the Vercel WAF fixed-window projection rule still require live proof; do
+    not infer those from the local Vercel runtime.
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 

@@ -34,6 +34,7 @@ artifacts = ["src/astroscout_api/bortle/*.npy"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = [".vercel"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
