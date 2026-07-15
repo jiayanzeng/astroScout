@@ -21,12 +21,14 @@ function sessionSummary(project: ProjectPlan): string {
 export function ProjectDetailCard({
   project,
   targetName,
+  contextLabel,
   loading,
   error,
   onClose,
 }: {
   project: ProjectPlan | null;
   targetName: string;
+  contextLabel: string;
   loading: boolean;
   error: string | null;
   onClose: () => void;
@@ -44,6 +46,7 @@ export function ProjectDetailCard({
         <div>
           <CardTitle>{project?.common_name ?? targetName}</CardTitle>
           <p className="text-muted-foreground mt-1 text-sm">30-night imaging projection</p>
+          <p className="text-muted-foreground mt-1 text-xs">Plan snapshot: {contextLabel}</p>
         </div>
         <Button type="button" size="sm" variant="ghost" onClick={onClose}>
           Close

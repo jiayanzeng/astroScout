@@ -337,9 +337,12 @@ The new ledger is deliberately open:
    signed-in chat/accounting/content-free-log acceptance passed. The preserved operational
    correction and non-secret evidence are recorded in `STATE.md` item 23 and
    `docs/evidence/2026-07-16-pa0-credential-closeout.md`.
-2. [ ] **PA-1 — immutable plan provenance and saved date:** bind ranking, projection,
-   observer context, and save to one request snapshot; persist the requested
-   `planned_for`; validate server-action input and affected-row outcomes.
+2. [ ] **PA-1 — immutable plan provenance and saved date (repository complete
+   2026-07-16; hosted acceptance pending):** ranking, projection, observer context, and
+   save now share one immutable successful-request snapshot; `planned_for`, action
+   validation, and no-row outcomes have deterministic coverage. Close only after an
+   authorized signed-in candidate deployment passes future-date save/reload and
+   changed-input acceptance. See `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 3. [ ] **PA-2 — complete/bounded chat target policy:** cover all 21 supported targets and
    common aliases, preserve Sun/Moon behavior, and ensure required actions plus final
    output fit the declared trajectory budget.

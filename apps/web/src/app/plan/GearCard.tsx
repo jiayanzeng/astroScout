@@ -45,15 +45,13 @@ export function GearCard({
         f_ratio: Number(fRatio),
         filter_kind: filterKind,
       });
-      if (result.error) {
+      if (result.status !== "success") {
         setError(result.error);
         return;
       }
-      if (result.profile) {
-        onProfilesChange([result.profile, ...profiles]);
-        onSelect(result.profile.id);
-        setName("");
-      }
+      onProfilesChange([result.data.profile, ...profiles]);
+      onSelect(result.data.profile.id);
+      setName("");
     });
   }
 
@@ -61,7 +59,7 @@ export function GearCard({
     setError(null);
     startTransition(async () => {
       const result = await deleteGearProfile(profile.id);
-      if (result.error) {
+      if (result.status !== "success") {
         setError(result.error);
         return;
       }
