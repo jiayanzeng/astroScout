@@ -73,13 +73,16 @@ Record the auth result without recording the email address or cookie.
    has no profile editor; owner `UPDATE` and cross-user denial remain mandatory coverage in
    `supabase/tests/track_c_acceptance.sql`, not a claimed browser action.
 3. Enter latitude `-36.85`, longitude `174.76`, and measured SQM `18.4`. Choose and record
-   an observing date, or explicitly record that the upcoming night was used.
+   a non-private future observing date at least seven days ahead; do not use the upcoming
+   night for the PA-1 acceptance run.
 4. Select **Rank targets**.
 5. Verify the response shows all of the following:
    - dark hours, Moon percentage, Bortle class, and `your SQM 18.4`;
    - dusk/dawn labelled with the device IANA zone/abbreviation and exact UTC in tooltips;
    - target score, peak altitude, hours visible, light-pollution sensitivity, and
      integration-time range columns;
+   - a **Plan snapshot** line with the exact coordinates, future date, location source,
+     selected profile, f-ratio/filter, and SQM used by the ranking;
    - planets show budget `n/a` rather than a deep-sky integration estimate.
 
 Astronomical values change with date. Record the exact observed values; do not hardcode a
@@ -87,18 +90,25 @@ past run's M42 hours or best-night date as the pass condition.
 
 ## 4. Exercise projection and saved-session persistence
 
-1. On the M42 row, select **Project**.
-2. Confirm the card reports M42, `30 nights`, the selected f/5 broadband assumptions, an
+1. Before projecting or saving, edit latitude from `-36.85` to `-36.84`. The ranking,
+   Project controls, and Save control must disappear until a new successful rank. Restore
+   `-36.85` and rank again. Repeat the invalidation check for date, gear selection, and SQM;
+   exercise browser geolocation too when the acceptance browser can provide it. No stale
+   projection or saved-session binding may survive any changed input.
+2. On the reranked M42 row, select **Project**.
+3. Confirm the card reports M42, `30 nights`, the selected f/5 broadband assumptions, an
    hours-needed range, completion guidance, a best night, and a 30-night usable-hours
-   strip. A planet projection may have nights but no integration budget; that is expected.
-3. Close the projection card, select **Save session**, and confirm **Session saved**.
-4. Enter `120` integration minutes and select **Log** on M42 once. Verify the plan row
+   strip. Its **Plan snapshot** must exactly match the successful ranking snapshot. A planet
+   projection may have nights but no integration budget; that is expected.
+4. Close the projection card, select **Save session**, and confirm **Session saved**.
+5. Enter `120` integration minutes and select **Log** on M42 once. Verify the plan row
    immediately reports two logged hours and progress against the modeled range.
-5. Open `/sessions`, then open the newly created session. Confirm the observation shows
+6. Open `/sessions`, then open the newly created session. Confirm the observation shows
    `120 min integration`.
-6. Record the `/sessions/<id>` URL. Confirm the saved coordinates and the M42 observation
-   remain after reloading both the list and detail page.
-7. Return to `/plan`, select the same gear, rank again, and confirm the aggregated M42
+7. Record the `/sessions/<id>` URL. Confirm the saved future `planned_for` date and
+   coordinates exactly match the successful ranking snapshot, and that they plus the M42
+   observation remain after reloading both the list and detail page.
+8. Return to `/plan`, select the same gear, rank again, and confirm the aggregated M42
    progress survives navigation/reload.
 
 The current product fixes the title to `Night plan @ <lat>, <lon>` and has no session
@@ -229,8 +239,10 @@ Complete one table; link evidence rather than pasting secrets or private content
 | anonymous/auth boundary | public plan; protected sessions/chat | | | |
 | gear create/reload/delete | own profile persists, then is absent | | | |
 | Auckland budgeted plan | gear/SQM fields and device-zone label | | | |
+| stale-input invalidation | coordinate/date/gear/SQM/geolocation cannot reuse result | | | |
+| plan/projection snapshot | exact coordinates/date/source/gear/SQM match | | | |
 | M42 projection | bounded 30-night detail | | | |
-| saved session/observation | 120 min + aggregate survive reload | | | |
+| saved session/observation | exact future date/coords + 120 min survive reload | | | |
 | planning chat | `planNight`, consistent observer | | | |
 | comparison chat | plan + exact M31/M42 details | | | |
 | science chat | `searchKnowledge`, title/bibcode citations | | | |

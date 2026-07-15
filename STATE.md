@@ -155,6 +155,7 @@ astroscout/
 │           ├── grounded-response.ts   # suppress model science prose; cited corpus excerpts ★
 │           ├── chat-{guard,persistence,usage,usage-store}.ts # bounds/history/accounting
 │           ├── proxy-params.ts, structured-log.ts # proxy validation + content-free events
+│           ├── plan-context.ts, action-{result,validation}.ts # immutable requests + actions
 │           ├── format.ts, utils.ts + __tests__/ (incl. observer/tool/policy/stream tests)
 │           └── supabase/{client,server,types}.ts
 │   └── evals/                         # eval harness (offline-runnable)  ★
@@ -281,6 +282,13 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
     latency events. Projection has process-local rate and concurrency guards. Production
     also enforces a Vercel WAF fixed-window limit of six `/api/project` requests per IP per
     60 seconds, returning 429 before excess work reaches a service worker.
+13. **Successful plans own immutable provenance.** A displayed ranking is paired with the
+    exact coordinates, requested/effective date, location source, profile identity and
+    gear inputs, and measured SQM that produced it. Projection, observer persistence, and
+    save consume that snapshot rather than current form fields. Any coordinate,
+    geolocation, date, gear, or SQM edit invalidates the active ranking and its projection/
+    saved-session binding; older in-flight responses cannot restore it. Server actions
+    validate runtime input and return explicit auth/validation/database/no-row outcomes.
 
 ---
 
@@ -505,6 +513,17 @@ marketing the estimator as numerically validated.
   labels, optional observing date/session id, and local-storage read/write helpers.
   `PlanClient` restores it, marks manual/geolocation changes, writes only after a
   successful plan, and upgrades the source to `saved_session` after a successful save.
+- `plan-context.ts`: strict, frozen successful-request snapshots bind the displayed
+  `NightPlan` to coordinates, requested/effective date, location source, selected profile
+  identity/name/f-ratio/filter/tier, and optional measured SQM. Shared query builders make
+  ranking and projection parameters identical; observer persistence and `saveSession`
+  derive from the same snapshot. Control changes clear the result/projection/session
+  binding, and a generation guard discards stale async completions.
+- `action-validation.ts` + `action-result.ts`: session, observation, gear-create, and
+  gear-delete actions share finite/bounded Zod validation and discriminated success,
+  auth, validation, database, and no-affected-row outcomes. `saveSession` supplies the
+  snapshot's exact `planned_for`; deletes select the affected id instead of treating an
+  RLS/no-row mutation as success. Database/RLS ownership remains unchanged.
 - `ai.ts`: `createChatTools(observer)` creates `planNight`, `getTargetDetail`, and
   `searchKnowledge`. Planning schemas deliberately exclude coordinates; their execution
   closes over the parsed request context and returns `{status,observer,...}` or
@@ -1252,12 +1271,69 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     because the existing uv cache was not readable, and the first sandboxed Turbopack build
     failed because worker port binding was denied; the permitted reruns passed.
 
+24. ⚠️ **PA-1 — immutable planner provenance (Repository and anonymous Preview
+    acceptance complete 2026-07-16; signed-in acceptance blocked by Preview auth).** The
+    web now stores each successful `NightPlan` with a frozen
+    request snapshot containing coordinates, requested/effective date, location source,
+    selected profile identity and gear inputs, and measured SQM. Ranking and projection
+    query builders share that snapshot; projection, observer persistence, and save never
+    read mutable controls. Coordinate, browser-geolocation result, date, gear, and SQM
+    changes clear the ranking/projection/session binding, while a generation guard prevents
+    an older request from restoring stale state.
+
+    `saveSession` now inserts the snapshot's exact `planned_for` and coordinates. Session,
+    observation, gear-create, and gear-delete actions share strict runtime bounds and
+    discriminated `success`, auth, validation, database, and no-affected-row outcomes.
+    Gear deletion selects the affected id, so an RLS/no-row delete is no longer reported
+    as success. No migration, RLS policy, dependency, budget/scoring constant, or committed
+    data artifact changed.
+
+    Local gates are green: API Ruff/format/mypy plus **99 passed / 19 deselected**; web
+    typecheck/ESLint plus **102 passed / 11 skipped** and a successful **14-route** build.
+    A local `next start` + FastAPI artifact returned 200 for Auckland. Its snapshot rendered
+    `-36.8500, 174.7600`; editing latitude to `-36.80` immediately removed the result/table,
+    and reranking rendered `-36.8000, 174.7600`. The browser harness did not emit React's
+    date-change event for the native date control, so that local attempt is not counted as
+    future-date browser proof. Deterministic future-date/action tests passed.
+
+    Commit `765b4f0` produced Ready Vercel Preview
+    `83aghW2DF2SLFTR4uq6UQmWDfMsb` without changing Production. The anonymous Preview
+    rendered the exact Auckland snapshot `-36.8500, 174.7600 · 2026-08-20`; changing
+    latitude to `-36.84` immediately removed the snapshot/table, and restoring the original
+    coordinate plus reranking restored the future-date snapshot. The direct Vercel CLI
+    path was unavailable because no local credentials were present and its check ended in
+    `Error: fetch failed`, so the approved Git-integrated Preview path was used.
+
+    After explicit approval added the exact ephemeral callback, a real Preview session
+    passed gear create/read/selection reload, the exact f/5 broadband + SQM 18.4 snapshot,
+    coordinate/date/profile/SQM invalidation, and M42 projection with a matching snapshot.
+    Save inserted session `b3b545a5-e3ec-45d1-881b-b8fc6232f35f` with exact date
+    `2026-08-20` and Auckland coordinates, but action revalidation remounted `/plan` before
+    `Session saved` or logging could persist visibly.
+
+    Commit `1c39cdc` removes only the session/observation revalidation responsible for that
+    remount and adds a successful-log regression. Web gates passed with **103 passed / 11
+    skipped** and a **14-route** build after the documented sandbox port-binding correction.
+    Ready deployment `2FA5YPaigXq25LxL1GmQpAPN1xAT` owns a stable branch alias, whose exact
+    callback was added with separate approval. A later retry first reached the measured
+    built-in quota of **2 emails/h**, then returned `access_denied` / `otp_expired` after the
+    window reset. The quota was not raised and credentials were not copied between hosts.
+
+    The approved recovery removed only the obsolete ephemeral callback (localhost,
+    Production, and the stable branch callback remain) and deleted the failed-run session
+    with an exact guarded SQL `RETURNING` result of **1 row**. Temporary gear remains solely
+    for the authorized post-merge Production acceptance. Corrected save, 120-minute M42
+    log, and list/detail reload remain required before PA-1 closes. Evidence:
+    `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
+
 ### Post-audit production-closeout workstream (opened 2026-07-15)
 
 - [x] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
   the deployed Supabase key class, with no credential value recorded.
-- [ ] **PA-1 planner provenance:** bind ranking/projection/save to one immutable request
-  context, persist the actual future `planned_for` date, and validate mutation outcomes.
+- [ ] **PA-1 planner provenance (review/merge authorized; Production acceptance pending):**
+  bind
+  ranking/projection/save to one immutable request context, persist the actual future
+  `planned_for` date, and validate mutation outcomes.
 - [ ] **PA-2 chat target policy:** cover all supported catalog names/aliases and guarantee
   the required-action set fits a bounded trajectory with final output.
 - [ ] **PA-3 chat reliability:** propagate deadlines through nested tools and add durable

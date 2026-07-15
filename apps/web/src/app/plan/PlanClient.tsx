@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { logObservation, saveSession } from "@/app/plan/actions";
 import { GearCard } from "@/app/plan/GearCard";
@@ -21,9 +21,19 @@ import {
 import {
   readObserverContext,
   writeObserverContext,
-  type ObserverContext,
   type ObserverLocationSource,
 } from "@/lib/observer-context";
+import {
+  createPlanRequestContext,
+  formatPlanRequestContext,
+  observerContextFromPlan,
+  parsePlanRequestInput,
+  planRequestMatchesContext,
+  planSearchParams,
+  projectSearchParams,
+  type PlanRequestContext,
+  type PlanRequestInput,
+} from "@/lib/plan-context";
 import {
   aggregateIntegrationMinutes,
   formatIntegrationProgress,
@@ -42,6 +52,11 @@ const LP_TIER_VARIANT: Record<LightSensitivityTier, "good" | "marginal" | "poor"
 
 const KIND_FILTERS = ["all", "galaxies", "nebulae", "clusters", "planets"] as const;
 type KindFilter = (typeof KIND_FILTERS)[number];
+
+type SuccessfulPlan = {
+  plan: NightPlan;
+  context: Readonly<PlanRequestContext>;
+};
 
 function matchesKindFilter(target: RankedTarget, filter: KindFilter): boolean {
   if (filter === "all") return true;
@@ -117,7 +132,7 @@ export function PlanClient({
   const [lon, setLon] = useState("174.76");
   const [when, setWhen] = useState("");
   const [locationSource, setLocationSource] = useState<ObserverLocationSource>("manual");
-  const [plan, setPlan] = useState<NightPlan | null>(null);
+  const [planResult, setPlanResult] = useState<SuccessfulPlan | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [gearProfiles, setGearProfiles] = useState(initialGearProfiles);
   const [selectedGearProfileId, setSelectedGearProfileId] = useState<string | null>(null);
@@ -137,6 +152,7 @@ export function PlanClient({
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
   const [pending, startTransition] = useTransition();
+  const requestGeneration = useRef(0);
 
   useEffect(() => {
     const restore = window.setTimeout(() => {
@@ -181,119 +197,104 @@ export function PlanClient({
     return Number.isFinite(value) && value >= 15 && value <= 22.1 ? value : undefined;
   }
 
-  function validateSkySqm(): number | undefined | null {
-    const value = parsedSkySqm();
-    if (skySqm.trim() && value === undefined) {
-      setError("Measured SQM must be between 15.0 and 22.1.");
-      return null;
-    }
-    return value;
+  function invalidatePlanBindings(): number {
+    const generation = ++requestGeneration.current;
+    setPlanResult(null);
+    setProject(null);
+    setProjectTarget(null);
+    setProjectError(null);
+    setProjectLoading(false);
+    setSessionId(null);
+    setLastLoggedTarget(null);
+    setLoading(false);
+    return generation;
   }
 
   function selectGear(profileId: string | null) {
+    invalidatePlanBindings();
     setSelectedGearProfileId(profileId);
-    setPlan(null);
-    setProject(null);
-    setProjectTarget(null);
   }
 
-  function observerContext(
-    date: string,
-    source: ObserverLocationSource = locationSource,
-    sessionId?: string,
-  ): ObserverContext | null {
-    const latitude = Number(lat);
-    const longitude = Number(lon);
-    if (
-      !Number.isFinite(latitude) ||
-      latitude < -90 ||
-      latitude > 90 ||
-      !Number.isFinite(longitude) ||
-      longitude < -180 ||
-      longitude > 180
-    ) {
-      return null;
-    }
-    return {
-      lat: latitude,
-      lon: longitude,
-      source,
-      ...(date ? { when: date } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    };
+  function requestInput(overrides?: { when?: string }): Readonly<PlanRequestInput> | null {
+    const sqm = selectedGearProfile ? parsedSkySqm() : undefined;
+    if (selectedGearProfile && skySqm.trim() && sqm === undefined) return null;
+    return parsePlanRequestInput({
+      lat: Number(lat),
+      lon: Number(lon),
+      when: (overrides?.when ?? when) || null,
+      source: locationSource,
+      gear: selectedGearProfile
+        ? {
+            profileId: selectedGearProfile.id,
+            profileName: selectedGearProfile.name,
+            fRatio: selectedGearProfile.f_ratio,
+            filter: selectedGearProfile.filter_kind,
+            tier: "clean",
+            sqm: sqm ?? null,
+          }
+        : null,
+    });
   }
 
-  function persistObserverContext(
-    date: string,
-    source: ObserverLocationSource = locationSource,
-    sessionId?: string,
-  ) {
-    const context = observerContext(date, source, sessionId);
-    if (context) writeObserverContext(window.localStorage, context);
-  }
+  const currentRequest = requestInput();
+  const activePlanResult =
+    planResult && planRequestMatchesContext(planResult.context, currentRequest)
+      ? planResult
+      : null;
+  const plan = activePlanResult?.plan ?? null;
+  const planGear = activePlanResult?.context.gear ?? null;
 
-  async function runPlan(whenOverride?: string) {
-    const w = whenOverride ?? when;
-    const observer = observerContext(w);
-    if (!observer) {
-      setError("Latitude must be -90 to 90 and longitude must be -180 to 180.");
+  async function runPlan(overrides?: { when?: string }) {
+    const generation = invalidatePlanBindings();
+    const request = requestInput(overrides);
+    if (!request) {
+      if (selectedGearProfile && skySqm.trim() && parsedSkySqm() === undefined) {
+        setError("Measured SQM must be between 15.0 and 22.1.");
+      } else {
+        setError("Latitude must be -90 to 90, longitude -180 to 180, and date valid.");
+      }
       return;
     }
-    const sqm = selectedGearProfile ? validateSkySqm() : undefined;
-    if (sqm === null) return;
     setLoading(true);
     setError(null);
-    setSessionId(null);
     try {
-      const params = new URLSearchParams({ lat: String(observer.lat), lon: String(observer.lon) });
-      if (w) params.set("when", w);
-      if (selectedGearProfile) {
-        params.set("f_ratio", String(selectedGearProfile.f_ratio));
-        params.set("filter", selectedGearProfile.filter_kind);
-        params.set("tier", "clean");
-        if (sqm !== undefined) params.set("sqm", String(sqm));
-      }
-      const res = await fetch(`/api/plan?${params}`);
+      const res = await fetch(`/api/plan?${planSearchParams(request)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "request failed");
-      setPlan(data as NightPlan);
-      writeObserverContext(window.localStorage, observer);
+      const successfulPlan = data as NightPlan;
+      const context = createPlanRequestContext(request, successfulPlan);
+      if (generation !== requestGeneration.current) return;
+      setPlanResult({ plan: successfulPlan, context });
+      writeObserverContext(window.localStorage, observerContextFromPlan(context));
     } catch (caught) {
+      if (generation !== requestGeneration.current) return;
       setError(caught instanceof Error ? caught.message : String(caught));
-      setPlan(null);
+      setPlanResult(null);
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
   }
 
   async function loadProject(target: RankedTarget) {
-    if (!selectedGearProfile) return;
-    const sqm = validateSkySqm();
-    if (sqm === null) return;
+    if (!activePlanResult?.context.gear) return;
+    const generation = requestGeneration.current;
+    const params = projectSearchParams(activePlanResult.context, target.name, 30);
+    if (!params) return;
     setProjectTarget(target.name);
     setProject(null);
     setProjectError(null);
     setProjectLoading(true);
     try {
-      const params = new URLSearchParams({
-        name: target.name,
-        lat,
-        lon,
-        f_ratio: String(selectedGearProfile.f_ratio),
-        filter: selectedGearProfile.filter_kind,
-        tier: "clean",
-        nights: "30",
-      });
-      if (when) params.set("when", when);
-      if (sqm !== undefined) params.set("sqm", String(sqm));
       const response = await fetch(`/api/project?${params}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "request failed");
+      if (generation !== requestGeneration.current) return;
       setProject(data as ProjectPlan);
     } catch (caught) {
+      if (generation !== requestGeneration.current) return;
       setProjectError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setProjectLoading(false);
+      if (generation === requestGeneration.current) setProjectLoading(false);
     }
   }
 
@@ -307,6 +308,7 @@ export function PlanClient({
     setError(null);
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
+        invalidatePlanBindings();
         setLat(coords.latitude.toFixed(2));
         setLon(coords.longitude.toFixed(2));
         setLocationSource("geolocation");
@@ -321,17 +323,29 @@ export function PlanClient({
   }
 
   function save() {
+    if (!activePlanResult) return;
+    const context = activePlanResult.context;
+    const generation = requestGeneration.current;
+    setError(null);
     startTransition(async () => {
       const result = await saveSession({
-        title: `Night plan @ ${lat}, ${lon}`,
-        latitude: Number(lat),
-        longitude: Number(lon),
+        title: `Night plan @ ${context.lat}, ${context.lon}`,
+        latitude: context.lat,
+        longitude: context.lon,
+        planned_for: context.plannedFor,
       });
-      if (result.error) setError(result.error);
-      else if (result.id) {
-        setSessionId(result.id);
-        setLocationSource("saved_session");
-        persistObserverContext(when, "saved_session", result.id);
+      if (generation !== requestGeneration.current) return;
+      if (result.status !== "success") {
+        setError(result.error);
+      } else {
+        setSessionId(result.data.id);
+        writeObserverContext(
+          window.localStorage,
+          observerContextFromPlan(context, {
+            source: "saved_session",
+            sessionId: result.data.id,
+          }),
+        );
       }
     });
   }
@@ -357,7 +371,7 @@ export function PlanClient({
         rating: target.rating,
         ...(minutes === undefined ? {} : { integration_minutes: minutes }),
       });
-      if (result.error) {
+      if (result.status !== "success") {
         setError(result.error);
         return;
       }
@@ -405,6 +419,7 @@ export function PlanClient({
               <Input
                 value={lat}
                 onChange={(event) => {
+                  invalidatePlanBindings();
                   setLat(event.target.value);
                   setLocationSource("manual");
                 }}
@@ -422,10 +437,8 @@ export function PlanClient({
                   step="0.1"
                   value={skySqm}
                   onChange={(event) => {
+                    invalidatePlanBindings();
                     setSkySqm(event.target.value);
-                    setPlan(null);
-                    setProject(null);
-                    setProjectTarget(null);
                   }}
                   placeholder="Optional"
                 />
@@ -436,6 +449,7 @@ export function PlanClient({
               <Input
                 value={lon}
                 onChange={(event) => {
+                  invalidatePlanBindings();
                   setLon(event.target.value);
                   setLocationSource("manual");
                 }}
@@ -453,7 +467,7 @@ export function PlanClient({
                 value={when}
                 onChange={(event) => {
                   setWhen(event.target.value);
-                  if (lat && lon) void runPlan(event.target.value);
+                  if (lat && lon) void runPlan({ when: event.target.value });
                 }}
               />
             </label>
@@ -509,6 +523,11 @@ export function PlanClient({
                   </time>{" "}
                   device time · {deviceTimeZoneLabel(plan.dusk_utc, plan.dawn_utc)}
                 </p>
+                {activePlanResult && (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    Plan snapshot: {formatPlanRequestContext(activePlanResult.context)}
+                  </p>
+                )}
               </div>
             )}
             {plan &&
@@ -559,7 +578,7 @@ export function PlanClient({
                         Recorded progress
                       </th>
                     )}
-                    {selectedGearProfile && <th className="py-2 font-medium" />}
+                    {planGear && <th className="py-2 font-medium" />}
                     {sessionId && <th className="py-2 font-medium">Record</th>}
                   </tr>
                 </thead>
@@ -645,7 +664,7 @@ export function PlanClient({
                             )}
                           </td>
                         )}
-                        {selectedGearProfile && (
+                        {planGear && (
                           <td className="py-2">
                             <Button
                               type="button"
@@ -702,7 +721,7 @@ export function PlanClient({
                           5 +
                           (estimatesShown ? 1 : 0) +
                           (progressShown ? 1 : 0) +
-                          (selectedGearProfile ? 1 : 0) +
+                          (planGear ? 1 : 0) +
                           (sessionId ? 1 : 0)
                         }
                         className="text-muted-foreground py-8 text-center"
@@ -725,10 +744,11 @@ export function PlanClient({
         </Card>
       )}
 
-      {projectTarget && (
+      {activePlanResult && projectTarget && (
         <ProjectDetailCard
           project={project}
           targetName={projectTarget}
+          contextLabel={formatPlanRequestContext(activePlanResult.context)}
           loading={projectLoading}
           error={projectError}
           onClose={() => {
