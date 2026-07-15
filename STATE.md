@@ -5,10 +5,11 @@ for amateur astronomers. Given a location (and optional future date) it ranks wh
 worth observing/imaging — accounting for altitude, the dark window, the moon, **and
 local light pollution** — lets users save sessions and log observations, and answers
 astronomy questions via an AI copilot grounded in a cited literature corpus (hybrid
-RAG + cross-encoder rerank). Everything here is built and tested; you supply ADS /
-OpenAI / Supabase (+ optional Cohere) keys to run it live. An opt-in local BGE ONNX
-reranker is also implemented. OpenAI calls can be routed through any OpenAI-compatible
-relay via `OPENAI_BASE_URL` (v0.6.1).
+RAG + cross-encoder rerank). The documented vertical slice is substantially built and
+locally tested; the post-audit production-closeout work in §5 remains open. You supply
+ADS / OpenAI / Supabase (+ optional Cohere) keys to run it live. An opt-in local BGE
+ONNX reranker is also implemented. OpenAI calls can be routed through any
+OpenAI-compatible relay via `OPENAI_BASE_URL` (v0.6.1).
 
 This document is the source of truth for a fresh session. Read it fully before editing.
 
@@ -103,8 +104,8 @@ astroscout/
 │       │   ├── chunking.py            # PURE chunk_text (overlapping)  [unit-tested]
 │       │   ├── embeddings.py          # embed_texts via OpenAI-compatible /embeddings endpoint
 │       │   │                          #   (settings.openai_base_url, default api.openai.com/v1)
-│       │   ├── store.py               # upsert_documents via Supabase PostgREST (service role);
-│       │   │                          #   appends /rest/v1/documents — SUPABASE_URL must be bare
+│       │   ├── store.py               # insert helper historically named upsert_documents;
+│       │   │                          #   no conflict key; SUPABASE_URL must be bare
 │       │   └── ingest.py              # ingest_target / ingest_catalog (fetch→chunk→embed→store)
 │       └── routers/
 │           ├── health.py              # GET /health
@@ -167,10 +168,15 @@ astroscout/
 │       │                              #   variants: raw hybrid, explicit LLM, explicit BGE
 │       │                              #   searchKnowledge accepts rerank + backend overrides
 │       ├── rerank.ts (+test)          # LexicalReranker, RerankedRetriever
-│       ├── dataset.ts                 # 8 exact + 6 semantic labelled cases
+│       ├── dataset.ts                 # 8 exact + 6 semantic + 4 planet-labelled cases
 │       ├── run.ts                     # comparison runner (writes report.json; gitignored)
 │       ├── braintrust.ts              # optional forwarder (dynamic import, no hard dep)
 │       └── README.md
+│
+├── docs/
+│   ├── live-acceptance.md             # canonical intended-host release journey
+│   ├── evidence/                      # dated measured records, including the source audit
+│   └── plans/                         # signed-off work plans and post-audit roadmap
 │
 └── supabase/
     ├── README.md
@@ -180,10 +186,11 @@ astroscout/
     │   ├── 0003_hybrid_search.sql     # fts tsvector + GIN + hybrid_search RRF RPC
     │   ├── 0004_gear_profiles.sql     # minimal user-owned f-ratio/filter profiles + RLS
     │   ├── 0005_privileges_and_rls_repair.sql  # explicit API grants + observation ownership
-    │   └── 0006_chat_usage_limits.sql  # authenticated quotas + content-free usage accounting
+    │   ├── 0006_chat_usage_limits.sql  # authenticated quotas + content-free usage accounting
+    │   └── 0007_observation_progress.sql # integration minutes + owner progress RPC
     └── tests/
         ├── bootstrap.sql              # disposable PostgreSQL Supabase-role shim
-        ├── track_c_acceptance.sql     # grants + CRUD + cross-user RLS + hybrid RPC
+        ├── track_c_acceptance.sql     # grants + CRUD + cross-user RLS + hybrid/progress RPCs
         └── chat_usage_acceptance.sql  # quota, accounting, and cross-user denial
 ```
 
@@ -506,9 +513,12 @@ marketing the estimator as numerically validated.
   source, and date/upcoming-night provenance.
 - `chat-policy.ts`: classifies the latest request and deterministically forces required
   tool steps before final prose. Science requires `searchKnowledge`; planning requires
-  `planNight`; named planning/comparison targets require one exact detail call each.
-  Bare catalog replies (for example `M1`) are planning, so they cannot become an
-  unsupported memory answer. `grounded-response.ts` removes all model-authored science
+  `planNight`; recognized named planning/comparison targets require one exact detail call
+  each. The current explicit name map covers only M31, M42, M101, Alpha Centauri, and
+  Jupiter plus designation regexes; the 2026-07-15 source audit records the missing
+  Saturn/Mars/Venus/Moon/common-name coverage as open. Bare recognized catalog replies
+  (for example `M1`) are planning, so they cannot become an unsupported memory answer.
+  `grounded-response.ts` removes all model-authored science
   text chunks while preserving tool cards, then emits at most three 24-word cited corpus
   excerpts. Empty/incompletely attributed results emit the exact insufficient-evidence
   message. Chat route uses
@@ -516,8 +526,10 @@ marketing the estimator as numerically validated.
   `toUIMessageStreamResponse()`, and the stateless `openai.chat("gpt-4o-mini")` provider
   for multi-step tool loops. It requires `supabase.auth.getUser()`, rejects bodies over
   64 KiB and oversized message histories, atomically reserves the `0006` per-user quota,
-  caps total work at 55 seconds within `maxDuration=60`, and accounts for chat, embedding,
-  LLM rerank, or Cohere usage. Structured request/step/tool logs contain timing, status,
+  declares a 55-second route timeout within `maxDuration=60`, and accounts for chat,
+  embedding, LLM rerank, or Cohere usage. Tool executors do not yet propagate the AI SDK
+  abort signal through nested planning/retrieval/rerank work, so the end-to-end bound is a
+  post-audit open item rather than a proven invariant. Structured request/step/tool logs contain timing, status,
   and bounded failure reasons only—never message text, tool payloads, keys, or secrets.
   Client uses `useChat<ChatMessage>()` + `sendMessage({text})`, ignores incomplete/
   unrecognized tool parts, and exposes retry plus a fresh-send path after stream errors.
@@ -733,7 +745,8 @@ comparison. Full output and evidence conditions are recorded in
 
 ## 5. Immediate next steps & unresolved items
 
-**Repository gates are green through item 21.** Track C3 live closeout was reopened by
+**Repository gates are green through item 21. A post-P2 source audit is filed in item 22
+and opens a separate production-closeout workstream.** Track C3 live closeout was reopened by
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
 application acceptance in item 17. Item 19's repository implementation, intended-platform
 proof, and multi-worker distributed projection guard are verified. Migration `0006` and its
@@ -1174,6 +1187,54 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     sandboxed `uv sync` and Turbopack build attempts failed on cache/port permissions; the
     required writable-cache and approved worker-capability reruns passed. No dependency,
     Bortle/SQM artifact, retrieval-default, or budget constant changed.
+
+22. ⚠️ **Post-P2 source completion audit (Filed 2026-07-15; remediation open).** A
+    read-only review of the current API, web, chat, migrations, ingestion, CI, deployment
+    configuration, and tests concluded that the planned vertical slice is a strong
+    release-candidate beta rather than a production-complete public release. The report is
+    preserved at
+    `docs/evidence/2026-07-15-source-completion-audit.md`; specific objectives,
+    dependencies, non-goals, acceptance criteria, evidence requirements, and stop
+    conditions are in
+    `docs/plans/2026-07-15-post-audit-production-closeout.md`.
+
+    Measured probes exposed two correctness invariants not covered by the earlier hosted
+    journey: M81 in a 24-hour polar-darkness window reports 24.3 visible hours, and bare
+    Saturn/Mars/Moon/Pleiades prompts receive no deterministic chat tool action while M45
+    correctly receives plan + detail. Source inspection also found that editable plan
+    controls can diverge from the displayed ranking before projection/save, future
+    observing dates are omitted from saved sessions, nested chat tools do not propagate
+    the route abort signal, the insert-only ingestion path has no conflict identity, chat
+    reservations lack stale recovery, and CI has no built-artifact browser journey.
+
+    This item files evidence and plans only. It does not change application behavior,
+    credentials, hosted configuration, schema, dependencies, corpus rows, Bortle/SQM
+    artifacts, retrieval defaults, or budget constants. The original ten-item completion
+    ledger remains a truthful historical record of its scope; it does not close this new
+    workstream. The audit's local baseline was API Ruff/format/mypy plus **99 passed / 19
+    deselected**, six focused Astropy cases, web typecheck/ESLint plus **83 passed / 11
+    skipped**, and a successful **14-route** build after the preserved sandbox worker-port
+    failure and permitted rerun. Hosted services were not re-tested by the audit.
+
+### Post-audit production-closeout workstream (opened 2026-07-15)
+
+- [ ] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
+  the deployed Supabase key class, with no credential value recorded.
+- [ ] **PA-1 planner provenance:** bind ranking/projection/save to one immutable request
+  context, persist the actual future `planned_for` date, and validate mutation outcomes.
+- [ ] **PA-2 chat target policy:** cover all supported catalog names/aliases and guarantee
+  the required-action set fits a bounded trajectory with final output.
+- [ ] **PA-3 chat reliability:** propagate deadlines through nested tools and add durable
+  terminal accounting/stale-reservation recovery.
+- [ ] **PA-4 numerical bound:** integrate interval occupancy so visible/usable time cannot
+  exceed the dark window.
+- [ ] **PA-5 ingestion integrity:** after separate data-plan sign-off, add deterministic
+  identities, real idempotency/resume, and approved exact-duplicate reconciliation.
+- [ ] **PA-6 boundary hardening:** sanitize generic public errors, verify private-service
+  limiter identity, harden mutation/reranker outcomes, and control schema-type drift.
+- [ ] **PA-7 built-artifact E2E:** automate the non-private core browser journey in CI.
+- [ ] **PA-8 truthful closeout:** rerun intended-host acceptance and reconcile every status
+  document only after the corresponding behavior is measured.
 
 ### P1 production credential follow-up (deferred 2026-07-15)
 

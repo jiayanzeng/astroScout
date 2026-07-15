@@ -317,6 +317,54 @@ calibration or data tuning.
 10. ✅ Implement C4(d) progress tracking and complete the evidence-based calibration and
     retrieval review, preserving the documented blocks/deferrals.
 
+## Post-audit production-closeout workstream — open 2026-07-15
+
+The completion ledger above remains the measured history of the original review. A later
+source-completion audit found additional correctness and reliability gaps that were not in
+that ten-item acceptance scope; it does not retroactively mark the original work undone.
+
+Read the filed evidence first:
+[`docs/evidence/2026-07-15-source-completion-audit.md`](docs/evidence/2026-07-15-source-completion-audit.md).
+The implementation contract for every new task—including objective, dependencies,
+non-goals, acceptance criteria, evidence, rollback, and stop conditions—is:
+[`docs/plans/2026-07-15-post-audit-production-closeout.md`](docs/plans/2026-07-15-post-audit-production-closeout.md).
+
+The new ledger is deliberately open:
+
+1. [ ] **PA-0 — credential/key-boundary incident closure:** obtain provider-side relay
+   credential revocation, deploy a replacement without recording it, verify the Supabase
+   browser key is publishable/anon, and rerun signed-in chat/accounting/log acceptance.
+2. [ ] **PA-1 — immutable plan provenance and saved date:** bind ranking, projection,
+   observer context, and save to one request snapshot; persist the requested
+   `planned_for`; validate server-action input and affected-row outcomes.
+3. [ ] **PA-2 — complete/bounded chat target policy:** cover all 21 supported targets and
+   common aliases, preserve Sun/Moon behavior, and ensure required actions plus final
+   output fit the declared trajectory budget.
+4. [ ] **PA-3 — real chat deadline and durable accounting:** propagate abort/deadline
+   through every nested planning/retrieval/rerank call, terminally log all exits, and add
+   idempotent completion plus stale-reservation recovery.
+5. [ ] **PA-4 — bounded visible-time integration:** replace inclusive endpoint counting
+   and prove `0 <= usable_hours <= hours_visible <= dark_hours` for normal, moving-target,
+   threshold-crossing, and polar cases.
+6. [ ] **PA-5 — idempotent/resumable ingestion and corpus reconciliation:** complete a
+   read-only duplicate/fingerprint design and approved dry-run manifest before any schema
+   or production-data mutation; then prove reruns and resumes add no duplicates.
+7. [ ] **PA-6 — public/deployment boundary hardening:** sanitize generic errors, verify
+   private-service client identity, make action/reranker outcomes explicit, and control
+   Supabase type drift.
+8. [ ] **PA-7 — built-artifact browser assurance:** add deterministic CI coverage for
+   auth boundaries, gear, future-date plan/save, changed-input invalidation, projection,
+   sessions/progress, chat persistence, timezone labels, and stable errors.
+9. [ ] **PA-8 — measured documentation and release closeout:** rerun the full local,
+   database, browser, live-agent, and intended-host gates; preserve failures; reconcile
+   README/STATE/runbook claims; and state the final release decision and residual risks.
+
+PA-0 through PA-4 block an unconditional public-release claim. PA-5 requires the separate
+data/provenance sign-off mandated by `AGENTS.md`; filing this roadmap is not authority to
+delete or backfill production rows. Observing-site timezone lookup, dark-nebula taxonomy,
+per-user calibration, and city-grid work remain evidence-gated product packages with entry
+criteria in the detailed plan.
+
 ## What not to change yet
 
 - Do not tune the World Atlas grid or swap q3 aggregation to make city readings look
