@@ -1047,6 +1047,31 @@ and the Track C follow-up backlog below remains open where marked:
     confirmation rather than an inferred repository claim. Follow-up is explicitly deferred
     and tracked below.
 
+20. ✅ **Documentation and operational reconciliation (Done 2026-07-15).** The root,
+    API, and web READMEs were checked against the current routes, UI actions, migrations,
+    retrieval RPC, production projection guard, auth boundary, gear behavior, and chat
+    tools. They now describe migrations `0001`→`0006`, `/plan`, the `/api/project`→
+    `/plan/project` path, all three chat tools, current World Atlas light-pollution data,
+    and the production WAF instead of leaving shipped features as gaps. The blank API
+    scorecard and stale `match_documents` production-retrieval claim were removed.
+    `docs/live-acceptance.md` is now the single canonical hosted journey for auth, gear
+    CRUD, budgeted planning, projection, saved sessions/observations, chat trajectories and
+    citations, text-only persistence, content-free accounting, structured target errors,
+    successful local/Simbad resolution, and the shared projection limit.
+
+    **Sequencing correction (2026-07-15):**
+    `NEXT_STEPS_RECOMMENDATIONS.md` originally placed this after P1 even though its own
+    requirement said to run the pass after P0. P1 was already complete before the ordering
+    defect was corrected. The document now makes reconciliation the P0→P1 prerequisite and
+    requires agents to read it in full before starting its work. This is documentation-only
+    closeout: no new live acceptance run was performed, no prior failure or superseding
+    correction was removed, and no application behavior, migration, dependency, or data
+    artifact changed. Repository verification remained green: API Ruff/format/mypy plus
+    **90 passed / 16 deselected**; web typecheck/ESLint plus **79 passed / 11 skipped** and
+    a successful **14-route** optimized build. The first sandboxed build attempt failed
+    because Turbopack was not permitted to bind its internal local port; the required
+    unsandboxed rerun compiled successfully.
+
 ### P1 production credential follow-up (deferred 2026-07-15)
 
 Credential values are intentionally not recorded here, elsewhere in the repository, or in
@@ -1119,3 +1144,5 @@ pnpm --filter @astroscout/web dev                        # http://localhost:3000
 ```
 `/plan` works without auth; sign-in (magic link) unlocks save/log and `/chat`. Chat also
 needs migration `0006`, `OPENAI_API_KEY`, and an ingested corpus for grounded answers.
+Use `docs/live-acceptance.md` as the single release-candidate journey; record new live
+results as dated evidence and preserve failed checks as corrections.

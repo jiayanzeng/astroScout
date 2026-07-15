@@ -28,7 +28,9 @@ relay endpoints are supported via `OPENAI_BASE_URL` (v0.6.1).
 - **Auth + persistence** — Supabase magic-link auth, Postgres + row-level security,
   saved **sessions** and logged **observations**; chat restores a validated, text-only
   browser-local history with an explicit Clear action and privacy policy.
-- **Web UI** — ranked-target table with save/log, sessions list + detail, copilot.
+- **Web UI** — `/plan` rankings and gear-aware budgets, on-demand 30-night
+  projections, saved-session list/detail with observation logging, and the authenticated
+  `/chat` copilot.
 - **AI copilot** — authenticated, quota-protected Vercel AI SDK with three tools:
   `planNight`, `getTargetDetail`, and `searchKnowledge`. The chat UI shows exactly what
   the copilot queried and what came back — including cited literature sources — while
@@ -83,7 +85,8 @@ it in committed env files, and never use `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
 ```bash
 # api
-cd apps/api && uv run ruff check . && uv run mypy src && uv run pytest -m "not integration"
+cd apps/api && uv run ruff check . && uv run ruff format --check . \
+  && uv run mypy src && uv run pytest -m "not integration"
 # web (repo root)
 pnpm --filter @astroscout/web lint && pnpm --filter @astroscout/web typecheck \
   && pnpm --filter @astroscout/web test && pnpm --filter @astroscout/web build
@@ -91,12 +94,17 @@ pnpm --filter @astroscout/web lint && pnpm --filter @astroscout/web typecheck \
 
 Tests hitting live CDS/Simbad, ADS, or OpenAI are marked `integration` and excluded from CI.
 
+The canonical production journey is [docs/live-acceptance.md](docs/live-acceptance.md).
+It covers auth, gear CRUD, budgeted planning, projection, saved sessions, grounded chat,
+persistence, accounting, and structured error behavior in one evidence record.
+
 ## Layout
 
 ```
 apps/api      FastAPI: planning engine, data adapters, RAG ingestion, validation script
 apps/web      Next.js: auth, /plan, /sessions, /chat copilot (plan + knowledge tools)
 supabase      schema + RLS + pgvector migrations, setup notes
+docs          implementation plans and the canonical live-acceptance runbook
 .github       CI (api + web jobs)
 ```
 
@@ -106,5 +114,6 @@ supabase      schema + RLS + pgvector migrations, setup notes
   browser/device zone and retains UTC tooltips instead of calling it site-local time.
 - Per-target rise/set times surfaced in the UI (computed internally already).
 - Background/scheduled ingestion (currently a manual CLI run).
-- Projection guards are per API process; a multi-worker deployment should also enforce a
-  gateway/distributed global limit.
+- Projection concurrency and sliding-window guards are per API process. The production
+  Vercel deployment also has a shared WAF limit of six `/api/project` requests per IP per
+  60 seconds; any other multi-worker host must provide an equivalent gateway-level limit.

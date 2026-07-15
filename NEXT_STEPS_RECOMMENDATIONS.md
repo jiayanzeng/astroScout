@@ -2,6 +2,10 @@
 
 Date: 2026-07-15
 
+**Execution rule (added 2026-07-15):** read this document in full before starting work
+from it. Follow the corrected ordering below and preserve measured failures as dated
+corrections rather than rewriting the original review.
+
 ## Scope and evidence
 
 This review covers the repository architecture, API and web implementation, Supabase
@@ -159,6 +163,27 @@ Centauri, and a misspelled Jupiter query).
 Acceptance gate: every live eval trajectory satisfies its required tool set, citations
 are present when science is discussed, and unsupported facts fail the gate.
 
+### Documentation and operational cleanup — prerequisite before P1
+
+After the P0 fixes, perform one documentation reconciliation pass:
+
+- update the root README to include migrations `0001` through the latest migration and
+  remove shipped features from “future scope”;
+- replace the stale API README light-pollution gap and endpoint list;
+- replace the stale web README visibility-only/getVisibility description with the current
+  `/plan`, `/api/project` → `/plan/project`, three-tool chat, auth, and gear behavior;
+- keep `STATE.md` measured and dated, with failed live checks preserved as corrections;
+- document a single live acceptance script covering auth, gear CRUD, plan budgets,
+  projection, saved sessions, chat trajectory/citations, and error cases.
+
+**Sequencing correction and completion (2026-07-15):** the original review placed this
+section after P2 and task 9 in the suggested sequence, so P1 was completed before this
+prerequisite. That ordering was wrong. The reconciliation is now complete in the root,
+API, and web READMEs; [`docs/live-acceptance.md`](docs/live-acceptance.md) is the canonical
+hosted journey; and `STATE.md` records this as documentation-only closeout. The original
+failed live checks and P1 deployment corrections remain intact. This completion does not
+retroactively claim that reconciliation preceded P1.
+
 ### P1 — production reliability and error semantics
 
 #### 5. Introduce target-resolution domain errors
@@ -236,19 +261,6 @@ Only after the live gear/profile path is green:
 7. Defer a finer city-core SQM grid until usage or measured-SQM data demonstrates that it
    is worth the data/provenance cost.
 
-## Documentation and operational cleanup
-
-After the P0 fixes, perform one documentation reconciliation pass:
-
-- update the root README to include migrations `0001` through the latest migration and
-  remove shipped features from “future scope”;
-- replace the stale API README light-pollution gap and endpoint list;
-- replace the stale web README visibility-only/getVisibility description with the current
-  `/plan`, `/project`, three-tool chat, auth, and gear behavior;
-- keep `STATE.md` measured and dated, with failed live checks preserved as corrections;
-- document a single live acceptance script covering auth, gear CRUD, plan budgets,
-  projection, saved sessions, chat trajectory/citations, and error cases.
-
 ## Suggested task sequence
 
 1. Correct `STATE.md` and land the gear grant repair migration.
@@ -256,10 +268,10 @@ After the P0 fixes, perform one documentation reconciliation pass:
 3. Complete the live C3→C4 browser path and record exact output.
 4. Bind chat tools to trusted location context and add location-consistency tests.
 5. Add trajectory-level grounding/citation evals using the real transcript cases.
-6. Fix target error taxonomy and proxy parameter validation.
-7. Add chat auth/rate/latency controls and test the production artifact.
-8. Add chat persistence and explicit time-zone semantics.
-9. Reconcile README/STATE documentation.
+6. Reconcile README/STATE documentation and land the canonical live-acceptance runbook.
+7. Fix target error taxonomy and proxy parameter validation.
+8. Add chat auth/rate/latency controls and test the production artifact.
+9. Add chat persistence and explicit time-zone semantics.
 10. Start C4(d) progress tracking, then revisit calibration and retrieval measurements.
 
 ## What not to change yet
