@@ -1123,8 +1123,8 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     because Turbopack was not permitted to bind its internal local port; the required
     unsandboxed rerun compiled successfully.
 
-21. **P2 — retention loop and evidence closeout (Repository + hosted database verified
-    2026-07-15; production artifact acceptance pending).** Migration `0007` adds nullable,
+21. ✅ **P2 — retention loop and evidence closeout (Repository, hosted database, and
+    production artifact verified 2026-07-15).** Migration `0007` adds nullable,
     non-negative observation integration minutes and an authenticated owner-scoped progress
     RPC. Saved-session logging accepts optional whole minutes; signed-in gear-aware plans
     show persisted per-target totals and modeled-range percentages, while legacy null rows,
@@ -1133,6 +1133,23 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     auth owners, proved 120-minute owner aggregation, negative-minute rejection, and
     cross-user invisibility, then rolled back all fixtures. The final schema/privilege query
     returned `true` for the column, constraint, authenticated execute grant, and anon revoke.
+
+    Commit `930907d` deployed to Vercel Production as deployment
+    `D4TF9i6DjAMRVDXhDtrvLkRMqcYr` (Ready; 1m14s build). At the stable production origin,
+    `/plan` returned 200; the dated Auckland plan returned 200 with 10.3 dark hours and 21
+    targets; North-Pole summer returned the structured 422
+    `no_astronomical_darkness`/`daylight_or_twilight_planning_required` state; and
+    North-Pole winter returned 200 with a bounded 24-hour
+    `continuous_astronomical_darkness` window and 21 targets.
+
+    Signed-in browser acceptance created a temporary f/5 broadband profile, planned from
+    the non-private Auckland starter with SQM 18.4, saved the session, and logged 120 whole
+    minutes for M42. The plan immediately showed `2.0 h logged` and `3–6% of modeled
+    range`; after a hard reload and fresh ranking, the same owner total returned. The saved
+    session detail showed `120 min integration`. The temporary profile was deleted and its
+    absence was confirmed after another hard reload. The acceptance session/observation is
+    retained per the canonical runbook rather than removed through an unapproved admin
+    path; it is synthetic acceptance evidence and must not feed calibration.
 
     Polar masked twilight no longer becomes a generic 502: no astronomical darkness raises
     a structured 422 product state, while continuous polar darkness returns a labelled,

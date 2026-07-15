@@ -244,6 +244,21 @@ Install/export the local proxy CA and set `NODE_EXTRA_CA_CERTS=<proxy-ca.pem>`, 
 remove `NODE_TLS_REJECT_UNAUTHORIZED=0`. Re-run chat, embeddings, reranking, and Supabase
 traffic. This is machine configuration and must remain outside committed env files.
 
+**Implementation/acceptance status (2026-07-15):** P1 is complete. Planning and
+visibility routers distinguish not-found, unsupported/daylight, and upstream failures;
+Moon and Sun have deliberate separate product behavior; and every Next proxy validates
+presence before numeric conversion. Authenticated chat now has bounded input, atomic
+per-user quotas, content-free token/cost/latency accounting, bounded model work, and a
+60-second deployment contract. Projection has process-local concurrency/rate guards plus
+a production WAF limit. Versioned text-only chat history, Clear conversation, explicit
+device-zone labels/UTC tooltips, and their reload/navigation/DST tests are shipped.
+Migration `0006`, the two-service Vercel artifact, stable-origin error cases, WAF 429,
+signed-in chat, accounting, structured logs, and reload/navigation behavior all passed
+hosted acceptance. The insecure TLS override is absent; chat, embeddings, reranking, and
+Supabase were re-run with normal validation through a machine-only `NODE_EXTRA_CA_CERTS`
+bundle. Exact measured results and the deliberately deferred credential follow-up remain
+in `STATE.md`.
+
 ### P2 — complete the retention loop and recalibrate with evidence
 
 Only after the live gear/profile path is green:
@@ -261,9 +276,13 @@ Only after the live gear/profile path is green:
 7. Defer a finer city-core SQM grid until usage or measured-SQM data demonstrates that it
    is worth the data/provenance cost.
 
-**Implementation/evidence status (2026-07-15):** repository work is complete and hosted
-migration `0007` passed rollback-wrapped owner/cross-user acceptance. Optional non-negative
-integration minutes now feed an owner-scoped progress RPC and signed-in plan/session UI.
+**Implementation/evidence status (2026-07-15):** repository work, hosted migration, and
+production artifact acceptance are complete. Migration `0007` passed rollback-wrapped
+owner/cross-user acceptance. Optional non-negative integration minutes now feed an
+owner-scoped progress RPC and signed-in plan/session UI. Production browser acceptance
+saved 120 minutes for M42, restored the `2.0 h` / `3–6%` aggregate after a hard reload,
+displayed `120 min integration` in the saved session, and removed the temporary gear
+profile. The acceptance observation is retained but explicitly excluded from calibration.
 Polar summer returns structured `no_astronomical_darkness`; continuous polar night uses a
 labelled bounded 24-hour window. The live 18-case retrieval A/B measured the actual corpus
 at **684 rows / 19 targets**, not 253; 225 rows are exact duplicates. LLM reranking improved
@@ -280,18 +299,23 @@ city-core grid remains deferred pending measured usage/provenance evidence. The 
 corpus duplication itself is a newly measured ingestion/idempotency follow-up, not silently
 cleaned as part of P2.
 
-## Suggested task sequence
+## Suggested task sequence — completion ledger
 
-1. Correct `STATE.md` and land the gear grant repair migration.
-2. Add authenticated gear CRUD/RLS acceptance tests and a database CI job.
-3. Complete the live C3→C4 browser path and record exact output.
-4. Bind chat tools to trusted location context and add location-consistency tests.
-5. Add trajectory-level grounding/citation evals using the real transcript cases.
-6. Reconcile README/STATE documentation and land the canonical live-acceptance runbook.
-7. Fix target error taxonomy and proxy parameter validation.
-8. Add chat auth/rate/latency controls and test the production artifact.
-9. Add chat persistence and explicit time-zone semantics.
-10. Start C4(d) progress tracking, then revisit calibration and retrieval measurements.
+All executable items in this dated sequence completed on 2026-07-15. Item 10 closed with
+measured implementation and explicit evidence-based deferrals rather than unsupported
+calibration or data tuning.
+
+1. ✅ Correct `STATE.md` and land the gear grant repair migration.
+2. ✅ Add authenticated gear CRUD/RLS acceptance tests and a database CI job.
+3. ✅ Complete the live C3→C4 browser path and record exact output.
+4. ✅ Bind chat tools to trusted location context and add location-consistency tests.
+5. ✅ Add trajectory-level grounding/citation evals using the real transcript cases.
+6. ✅ Reconcile README/STATE documentation and land the canonical live-acceptance runbook.
+7. ✅ Fix target error taxonomy and proxy parameter validation.
+8. ✅ Add chat auth/rate/latency controls and test the production artifact.
+9. ✅ Add chat persistence and explicit time-zone semantics.
+10. ✅ Implement C4(d) progress tracking and complete the evidence-based calibration and
+    retrieval review, preserving the documented blocks/deferrals.
 
 ## What not to change yet
 
