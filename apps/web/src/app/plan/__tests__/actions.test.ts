@@ -62,7 +62,33 @@ describe("validated plan server actions", () => {
       planned_for: "2026-08-15",
       user_id: USER_ID,
     });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/sessions");
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active planner mounted after logging an observation", async () => {
+    const observationId = "44444444-4444-4444-8444-444444444444";
+    const builder = mutationBuilder({ data: { id: observationId }, error: null });
+    mocks.createClient.mockResolvedValue(clientWithBuilder(builder));
+
+    const result = await logObservation({
+      session_id: SESSION_ID,
+      target: "M42",
+      score: 45.9,
+      rating: "good",
+      integration_minutes: 120,
+    });
+
+    expect(result).toEqual({ status: "success", data: { id: observationId } });
+    expect(builder.insert).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      target: "M42",
+      score: 45.9,
+      rating: "good",
+      integration_minutes: 120,
+      notes: null,
+      user_id: USER_ID,
+    });
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it.each([

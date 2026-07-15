@@ -40,7 +40,9 @@ export async function saveSession(
 
   if (error) return actionFailure("database_error", "Could not save session");
   if (!data) return actionFailure("no_affected_rows", "Session was not created");
-  revalidatePath("/sessions");
+  // Revalidating from this server action remounts the active /plan client tree, which
+  // discards the successful ranking before it can bind the returned session id. Session
+  // pages are authenticated dynamic renders and read the inserted row on navigation.
   return { status: "success", data: { id: data.id } };
 }
 
@@ -68,7 +70,8 @@ export async function logObservation(
 
   if (error) return actionFailure("database_error", "Could not log observation");
   if (!data) return actionFailure("no_affected_rows", "Observation was not created");
-  revalidatePath(`/sessions/${parsed.data.session_id}`);
+  // Keep the planner mounted so its local progress update and "Logged" acknowledgement
+  // survive. The session detail reads current owner data when it is opened.
   return { status: "success", data: { id: data.id } };
 }
 
