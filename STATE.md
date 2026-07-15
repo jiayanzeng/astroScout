@@ -688,10 +688,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
 application acceptance in item 17. Item 19's repository implementation, intended-platform
 proof, and multi-worker distributed projection guard are verified. Migration `0006` and its
-hosted acceptance are verified. A signed-in production chat request still requires a real
-user magic-link session; it was not replaced with an agent-created auth fixture. C4(d)
-remains an explicitly deferred stretch and the Track C follow-up backlog below remains open
-where marked:
+hosted acceptance are verified. A real user magic-link session also passed signed-in
+production chat, accounting, structured-log, and reload-persistence acceptance; it was not
+replaced with an agent-created auth fixture. C4(d) remains an explicitly deferred stretch
+and the Track C follow-up backlog below remains open where marked:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -958,8 +958,8 @@ where marked:
     **13-route** production build passed. No dependencies or committed data changed.
 
 19. **P1 — production reliability and error semantics (Repository + hosted database +
-    production hosting and shared limiter verified 2026-07-15; signed-in chat acceptance
-    open).** Target
+    production hosting, shared limiter, and signed-in chat acceptance verified
+    2026-07-15).** Target
     resolution now has explicit
     `TargetNotFound`, `UnsupportedTarget`, and `UpstreamResolutionError` categories mapped
     by both planning and visibility routers to 404, structured 422, and 502 respectively.
@@ -1025,11 +1025,26 @@ where marked:
     stable production origin as its Site URL and allows both the production and localhost
     `/auth/callback` URLs. The published WAF rule was exercised with seven small invalid
     projection requests: six reached the proxy and returned its expected 400, while the
-    excess request returned 429. Do not infer signed-in production chat/provider success
-    from the anonymous 401 or the rollback-wrapped database acceptance; that final browser
-    acceptance still needs a real magic-link session. Operationally, rotate the configured
-    relay key before treating public chat as cleared: Vercel marked it sensitive, but the
-    import form exposed its value to the browser automation accessibility snapshot.
+    excess request returned 429.
+
+    Signed-in production acceptance used a real magic-link session and the built-in
+    non-private Auckland starter. `/api/chat` returned 200, invoked `planNight`, completed
+    two model steps, and rendered an assistant response. The content-free database row was
+    `completed` with 1,815 input, 391 output, and 2,206 total tokens, estimated cost
+    `$0.00050685`, 21,886 ms duration, and no failure reason. Vercel grouped five structured
+    events for the same request: request start, `planNight` completion at 9,899 ms, step 0
+    at 12,158 ms, step 1 at 8,609 ms, and request completion at 22,193 ms. The events had no
+    prompt, response, message, or secret fields. Observed external calls were Supabase user
+    verification, quota reservation, two relay chat-completion steps, the private planning
+    service, and quota completion. Reload restored exactly one user and one assistant text
+    message while omitting the tool payload; fresh client navigation passed in both
+    Plan→Chat and Chat→Plan directions.
+
+    Operationally, the relay credential currently configured in Vercel succeeded in that
+    live request. Provider-side revocation of the earlier value cannot be proven from the
+    application: Vercel marked it sensitive, but the import form exposed it to the browser
+    automation accessibility snapshot, so revocation must remain an explicit maintainer
+    confirmation rather than an inferred repository claim.
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 
