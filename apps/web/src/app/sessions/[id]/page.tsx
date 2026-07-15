@@ -18,14 +18,26 @@ export default async function SessionDetail({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: session } = await supabase
+  const { data: session, error: sessionError } = await supabase
     .from("sessions")
     .select("*")
     .eq("id", id)
-    .single<Session>();
+    .maybeSingle<Session>();
+  if (sessionError) {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-12">
+        <Link href="/sessions" className="text-sm underline underline-offset-4">
+          ← Sessions
+        </Link>
+        <p className="text-destructive text-sm" role="alert">
+          Could not load session: {sessionError.message}
+        </p>
+      </main>
+    );
+  }
   if (!session) notFound();
 
-  const { data: observations } = await supabase
+  const { data: observations, error: observationsError } = await supabase
     .from("logged_observations")
     .select("*")
     .eq("session_id", id)
@@ -48,7 +60,11 @@ export default async function SessionDetail({
           <CardTitle className="text-base">Logged observations</CardTitle>
         </CardHeader>
         <CardContent>
-          {!observations?.length ? (
+          {observationsError ? (
+            <p className="text-destructive text-sm" role="alert">
+              Could not load observations: {observationsError.message}
+            </p>
+          ) : !observations?.length ? (
             <p className="text-muted-foreground text-sm">
               Nothing logged yet. Go to the plan and hit “Log” on targets you observed.
             </p>

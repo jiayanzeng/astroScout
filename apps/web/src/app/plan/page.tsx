@@ -10,12 +10,14 @@ export default async function PlanPage() {
     data: { user },
   } = await supabase.auth.getUser();
   let gearProfiles: GearProfile[] = [];
+  let gearProfilesError: string | null = null;
   if (user) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("gear_profiles")
       .select("id,user_id,name,f_ratio,filter_kind,created_at")
       .order("created_at", { ascending: false });
     gearProfiles = (data ?? []) as GearProfile[];
+    gearProfilesError = error?.message ?? null;
   }
 
   return (
@@ -34,7 +36,11 @@ export default async function PlanPage() {
         </p>
       )}
 
-      <PlanClient signedIn={!!user} initialGearProfiles={gearProfiles} />
+      <PlanClient
+        signedIn={!!user}
+        initialGearProfiles={gearProfiles}
+        initialGearProfilesError={gearProfilesError}
+      />
     </main>
   );
 }

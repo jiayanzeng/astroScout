@@ -17,6 +17,7 @@ const FILTER_LABELS: Record<GearProfile["filter_kind"], string> = {
 
 type GearCardProps = {
   profiles: GearProfile[];
+  initialError: string | null;
   selectedProfileId: string | null;
   onProfilesChange: (profiles: GearProfile[]) => void;
   onSelect: (profileId: string | null) => void;
@@ -24,6 +25,7 @@ type GearCardProps = {
 
 export function GearCard({
   profiles,
+  initialError,
   selectedProfileId,
   onProfilesChange,
   onSelect,
@@ -31,7 +33,7 @@ export function GearCard({
   const [name, setName] = useState("");
   const [fRatio, setFRatio] = useState("5.0");
   const [filterKind, setFilterKind] = useState<GearProfile["filter_kind"]>("broadband");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [pending, startTransition] = useTransition();
 
   function create(event: FormEvent<HTMLFormElement>) {
@@ -136,7 +138,11 @@ export function GearCard({
           </Button>
         </form>
 
-        {error && <p className="text-destructive text-sm">{error}</p>}
+        {error && (
+          <p className="text-destructive text-sm" role="alert">
+            Could not load or save gear profiles: {error}
+          </p>
+        )}
 
         {profiles.length > 0 ? (
           <ul className="divide-border divide-y">
@@ -159,9 +165,9 @@ export function GearCard({
               </li>
             ))}
           </ul>
-        ) : (
+        ) : !error ? (
           <p className="text-muted-foreground text-sm">No gear profiles yet.</p>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );

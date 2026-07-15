@@ -18,10 +18,16 @@ so run that too (`cd apps/api && uv run uvicorn astroscout_api.main:app --reload
 
 ## What's wired
 
-- `/` — visibility lookup form → calls `/api/visibility` → proxies to FastAPI `/visibility`
-- `/chat` — `useChat` UI → `/api/chat` (Vercel AI SDK `streamText` + a `getVisibility`
-  tool that calls the same FastAPI endpoint, i.e. real tool-calling)
+- `/plan` — ranked night planning, signed-in gear profiles, integration-time ranges,
+  measured SQM override, session saving, and on-demand multi-night projections
+- `/sessions` — authenticated saved sessions and logged observations, protected by RLS
+- `/chat` — relay-safe Vercel AI SDK tool loop for planning, target detail, and cited
+  knowledge search
 - shadcn/ui set up (`components.json`, `lib/utils.ts`, `ui/button|input|card`)
+
+Supabase migrations `0001` through `0005` must be applied in order. Database read errors
+are rendered explicitly on the signed-in plan/session pages instead of appearing as empty
+state.
 
 ## Checks (same as CI)
 

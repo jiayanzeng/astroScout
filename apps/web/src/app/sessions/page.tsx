@@ -12,7 +12,7 @@ export default async function SessionsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: sessions } = await supabase
+  const { data: sessions, error } = await supabase
     .from("sessions")
     .select("*")
     .order("planned_for", { ascending: false });
@@ -26,14 +26,18 @@ export default async function SessionsPage() {
         </Link>
       </header>
 
-      {!sessions?.length && (
+      {error ? (
+        <p className="text-destructive text-sm" role="alert">
+          Could not load sessions: {error.message}
+        </p>
+      ) : !sessions?.length ? (
         <p className="text-muted-foreground text-sm">
           No saved sessions yet. Plan a night and hit “Save session”.
         </p>
-      )}
+      ) : null}
 
       <div className="flex flex-col gap-3">
-        {sessions?.map((s: Session) => (
+        {!error && sessions?.map((s: Session) => (
           <Link key={s.id} href={`/sessions/${s.id}`}>
             <Card className="transition-colors hover:bg-accent">
               <CardHeader>

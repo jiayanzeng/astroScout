@@ -48,7 +48,8 @@ Vercel AI SDK v6 · Supabase (auth + Postgres + pgvector + RLS) · OpenAI embedd
 
 ```bash
 # 1. Supabase — see supabase/README.md
-#    create a project, run migrations 0001 -> 0002 -> 0003, enable email auth
+#    create a project, run migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005,
+#    then enable email auth
 #    NOTE: SUPABASE_URL must be the bare project URL (https://<ref>.supabase.co) —
 #    do NOT append /rest/v1; the store client adds the REST path itself.
 

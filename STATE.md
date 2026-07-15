@@ -161,11 +161,15 @@ astroscout/
 │
 └── supabase/
     ├── README.md
-    └── migrations/
-        ├── 0001_init.sql              # sessions + logged_observations (+ RLS, user-scoped)
-        ├── 0002_knowledge.sql         # vector ext + documents + match_documents RPC (public-read RLS)
-        ├── 0003_hybrid_search.sql     # fts tsvector + GIN + hybrid_search RRF RPC
-        └── 0004_gear_profiles.sql     # minimal user-owned f-ratio/filter profiles + RLS
+    ├── migrations/
+    │   ├── 0001_init.sql              # sessions + logged_observations (+ RLS, user-scoped)
+    │   ├── 0002_knowledge.sql         # vector ext + documents + match_documents RPC (public-read RLS)
+    │   ├── 0003_hybrid_search.sql     # fts tsvector + GIN + hybrid_search RRF RPC
+    │   ├── 0004_gear_profiles.sql     # minimal user-owned f-ratio/filter profiles + RLS
+    │   └── 0005_privileges_and_rls_repair.sql  # explicit API grants + observation ownership
+    └── tests/
+        ├── bootstrap.sql              # disposable PostgreSQL Supabase-role shim
+        └── track_c_acceptance.sql     # grants + CRUD + cross-user RLS + hybrid RPC
 ```
 
 ### Web dependency versions (resolved, latest-stable)
@@ -220,8 +224,10 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
    Relay corollary (v0.6.1): if `OPENAI_BASE_URL` points at a relay, the relay must serve
    this exact model on **both** sides; point both sides at the same endpoint.
 7. **RLS model.** `sessions` + `logged_observations` + `gear_profiles` are
-   **user-scoped** (`auth.uid()`). `documents` (knowledge base) is **shared**:
-   public-read, writes via service role only.
+   **user-scoped** (`auth.uid()`). Observation insert/update also proves that the
+   referenced session belongs to the same authenticated user. SQL privileges are
+   explicit in `0005`; RLS policies do not replace grants. `documents` (knowledge base)
+   is **shared**: public-read, writes via service role only.
 8. **Versions: latest stable, transparently.** Resolved to Next 16 / AI SDK v6 (the plan
    said Next 15). Flagged in `apps/web/README.md` with a pin-to-15 command. ESLint pinned
    to **9** because eslint-config-next 16's flat config breaks on ESLint 10.
@@ -459,7 +465,9 @@ slightly ahead, still consistent with “no discernible difference.”
   and renders `GearCard`; anonymous users see no new surface. Authenticated server actions
   create and delete name/f-ratio/filter rows. `PlanClient` owns the current profile list
   and selected id, persisting the latter under a client-only `localStorage` key so C4 can
-  consume the selected profile without changing C3 planning requests.
+  consume the selected profile without changing C3 planning requests. As of the P0 repair,
+  initial profile/session/observation read failures render as errors rather than false
+  empty states.
 - Track C4 budget UI (2026-07-11): selecting gear activates a mobile-collapsible
   community-range column, grid/user SQM badge, persisted validated SQM override, and the
   required World Atlas resolution/false-precision caption. Details are loaded per target
@@ -480,8 +488,12 @@ slightly ahead, still consistent with “no discernible difference.”
 - `0004`: `gear_profiles(id,user_id,name,f_ratio,filter_kind,created_at)` with f-ratio
   `(0,32]`, three budget filter kinds, user/time index, and own-row select/insert/update/
   delete RLS. It deliberately has no SQM column: sky brightness belongs to the site.
-  Run order: 0001 → 0002 → 0003 → 0004. The migration file is present in the repo but
-  must be applied by the maintainer in Supabase.
+- `0005`: explicit `anon`/`authenticated`/`service_role` table, sequence, schema, and RPC
+  privileges; removes anonymous access to user-owned tables and public RPC execution;
+  strengthens observation insert/update so `session_id` must name the same user's session.
+  Run order: 0001 → 0002 → 0003 → 0004 → 0005. CI replays the full chain in PostgreSQL
+  with pgvector, reapplies `0005` to prove idempotency, and tests owner CRUD, cross-user
+  denial, cross-session denial, and one authenticated `hybrid_search` call.
 
 ### Eval harness numbers (offline, deterministic stand-ins)
 ```
@@ -561,13 +573,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
   - **Key selection**: API `SUPABASE_SERVICE_KEY` = the **legacy `service_role`
     secret** (the long JWT); web `NEXT_PUBLIC_SUPABASE_ANON_KEY` = the **new
     publishable key** (`sb_publishable_...`).
-  - If ingest hits `permission denied for table documents` (code 42501), the tables
-    were created under a different owner/role — grant explicitly in the SQL editor:
-    ```sql
-    GRANT SELECT, INSERT, UPDATE, DELETE ON public.documents TO service_role;
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
-    ```
+  - Migration `0005_privileges_and_rls_repair.sql` is the canonical privilege repair for
+    existing and fresh projects. If PostgREST reports code 42501 for gear, sessions,
+    observations, documents, or search RPCs, verify that `0005` is applied; do not add an
+    undocumented dashboard-only grant.
 - **Local-dev quirks (real machines, not the sandbox)**:
   - Newer pnpm blocks dependency build scripts by default
     (`ERR_PNPM_IGNORED_BUILDS` for `sharp`, `esbuild`). Run `pnpm approve-builds` in
@@ -594,8 +603,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**CI is green.** Items 0–16 are done. C4(d) remains an explicitly deferred stretch and
-the Track C follow-up backlog below remains open where marked:
+**Repository gates are green through item 17.** Track C3 live closeout was reopened by
+the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
+application acceptance in item 17. C4(d) remains an explicitly deferred stretch and the
+Track C follow-up backlog below remains open where marked:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -755,8 +766,9 @@ the Track C follow-up backlog below remains open where marked:
     with **69 passed / 13 deselected**; both new local-Astropy integration cases pass
     explicitly (**2 passed**). No dependencies or committed data changed.
 
-14. ✅ **Track C3 — `gear_profiles` migration + minimal web gear UI (Done
-    2026-07-11).** Added the three-field user-owned gear schema with the exact f-ratio and
+14. ✅ **Track C3 — `gear_profiles` migration + minimal web gear UI (Repository
+    implementation done 2026-07-11; live repair verified 2026-07-15).** Added the
+    three-field user-owned gear schema with the exact f-ratio and
     filter constraints, index, and four `0001`-pattern RLS policies; SQL was not applied
     from the agent environment. Supabase setup now records the 0001→0004 order and the
     deliberate absence of gear SQM. Signed-in `/plan` server-loads profiles and exposes
@@ -769,11 +781,23 @@ the Track C follow-up backlog below remains open where marked:
     API regression gate remains green at **69 passed / 13 deselected**. No dependencies
     changed.
 
-    **Maintainer live verification (2026-07-12):** migration `0004` is applied in the
-    configured Supabase project and multiple signed-in `createGearProfile` actions
-    returned 200. This confirms the live migration and authenticated create path. The
-    supplied transcript did not exercise delete or cross-user RLS, so those are not
-    claimed as live-verified.
+    **Superseding correction (2026-07-15):** the signed-in `/plan` transcript shows
+    `permission denied for table gear_profiles`, no saved profiles, and therefore no live
+    C4 projection. The observed server-action HTTP 200 was only the Next.js action
+    wrapper; `createGearProfile` returned a database business error. The prior paragraph's
+    authenticated-create conclusion is retracted. Migration `0005` repairs explicit role
+    privileges and the new CI job covers grants/RLS.
+
+    **Hosted repair evidence (2026-07-15):** `0005` executed successfully in the configured
+    Supabase project. A read-only SQL check returned true for authenticated gear
+    select/insert/update/delete, anonymous gear denial, authenticated `hybrid_search`
+    execution, and the observation-to-owned-session policy guard. A rollback-wrapped
+    transaction then passed owner CRUD, cross-user read/update/delete denial,
+    cross-session observation denial, and an authenticated hybrid RPC call without leaving
+    test rows. The application-level acceptance then created `P0 acceptance 2026-07-15`,
+    reloaded `/plan` and observed it still selected, ran the SQM 18.4 gear-aware plan,
+    opened M42's 30-night projection, deleted the profile, and reloaded to prove cleanup.
+    No permission error appeared.
 
 15. ✅ **Track C4 — surface budget ranges, measured SQM, and completion detail (Done
     2026-07-11).** Optional gear parameters now flow through `/plan/night`; their absence
@@ -805,6 +829,27 @@ the Track C follow-up backlog below remains open where marked:
     build. Python 3.12.13 parity was also verified in an isolated environment without
     replacing the maintainer's existing Python 3.13 `.venv`.
 
+17. ✅ **P0 — restore the live Track C vertical slice (Done 2026-07-15).** Added
+    immutable migration `0005` instead of
+    rewriting applied history. It makes all required API-role privileges explicit,
+    removes anonymous user-table access and implicit public RPC execution, and closes the
+    cross-user session-reference hole in observation writes. The new CI database job is
+    configured with PostgreSQL 16 + pgvector to replay all migrations, reapply `0005`,
+    verify privileges, exercise owner create/read/update/delete, prove cross-user and
+    cross-session denial, and call `hybrid_search` as `authenticated`. `/plan`, `/sessions`,
+    and session detail now display Supabase read errors rather than reporting empty data.
+    No service-role key was added to the web app. Measured local gates: API
+    Ruff/format/mypy clean with **72 passed / 16 deselected**; web typecheck/ESLint clean,
+    **45 passed + 6 skipped**, and a successful **13-route** production build. This machine
+    has no PostgreSQL or Docker, so the new database job is executable CI coverage but not
+    yet a locally observed pass. Hosted `0005`, effective grants, rollback-wrapped owner/
+    cross-user RLS behavior, and the hybrid RPC are directly verified. Signed-in browser
+    acceptance also passed create → reload/persist/select → SQM 18.4 rank → M42 30-night
+    projection → delete → reload/absent. The API returned 200 for both gear-aware
+    `/plan/night` and `/plan/project`; M42 displayed **34.8–69.5 h**, a 30-night horizon,
+    and best projected night 2026-08-12. The final reload showed the genuine empty state
+    with no permission error, and the acceptance profile was removed.
+
 ### Track C follow-up backlog (recorded 2026-07-12)
 
 - **Polar dark-window handling (open, low priority):** replace predictable 502 responses
@@ -834,10 +879,10 @@ ones fail purely due to blocked network — expected.
 ## 6. How to run the whole thing (live)
 
 ```bash
-# 1. Supabase: create project; run migrations 0001→0002→0003→0004; enable email auth;
+# 1. Supabase: create project; run migrations 0001→0002→0003→0004→0005; enable email auth;
 #    allow http://localhost:3000/auth/callback
-#    SUPABASE_URL = bare project URL (no /rest/v1); if ingest hits 42501, run the
-#    GRANT statements in §4.
+#    SUPABASE_URL = bare project URL (no /rest/v1). A 42501 means migration 0005 is
+#    missing or the hosted schema has drifted; do not patch privileges out of band.
 # 2. API
 cd apps/api && uv sync
 cp ../../.env.example ../../.env         # ADS/OpenAI/Supabase keys; CORS has a default

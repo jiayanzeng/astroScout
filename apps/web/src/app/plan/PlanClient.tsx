@@ -80,9 +80,11 @@ function LoadingRows({ showBudget }: { showBudget: boolean }) {
 export function PlanClient({
   signedIn,
   initialGearProfiles,
+  initialGearProfilesError,
 }: {
   signedIn: boolean;
   initialGearProfiles: GearProfile[];
+  initialGearProfilesError: string | null;
 }) {
   const [lat, setLat] = useState("-36.85");
   const [lon, setLon] = useState("174.76");
@@ -269,6 +271,7 @@ export function PlanClient({
       {signedIn && (
         <GearCard
           profiles={gearProfiles}
+          initialError={initialGearProfilesError}
           selectedProfileId={selectedGearProfileId}
           onProfilesChange={setGearProfiles}
           onSelect={selectGear}

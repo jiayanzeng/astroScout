@@ -5,6 +5,41 @@ on:
   pull_request:
 
 jobs:
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.5-pg16
+        env:
+          POSTGRES_DB: astroscout
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d astroscout"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: astroscout
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap Supabase roles
+        run: psql -X -v ON_ERROR_STOP=1 -f supabase/tests/bootstrap.sql
+      - name: Replay migrations
+        run: |
+          for migration in supabase/migrations/*.sql; do
+            psql -X -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Verify repair migration is idempotent
+        run: psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/0005_privileges_and_rls_repair.sql
+      - name: Verify Track C privileges, CRUD, RLS, and RPC
+        run: psql -X -v ON_ERROR_STOP=1 -f supabase/tests/track_c_acceptance.sql
+
   api:
     runs-on: ubuntu-latest
     defaults:
