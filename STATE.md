@@ -127,10 +127,10 @@ astroscout/
 │
 ├── apps/web/
 │   ├── package.json                   # scripts: dev/build/start/lint/typecheck/test/eval
-│   ├── middleware.ts                  # Supabase auth-session refresh on every request
 │   ├── tsconfig.json, eslint.config.mjs (native flat config), vitest.config.ts (@ alias + evals)
 │   ├── components.json, postcss.config.mjs, .env.example
 │   └── src/
+│       ├── proxy.ts                   # Node-runtime Supabase auth-session refresh (Next 16)
 │       ├── app/
 │       │   ├── page.tsx               # → redirect /plan
 │       │   ├── plan/ page.tsx + PlanClient.tsx + actions.ts   # ranked table, budgets, save/log/gear
@@ -267,8 +267,9 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 12. **Public compute is authenticated and bounded.** Chat requires a verified Supabase
     user, reserves an atomic per-user database quota, caps request/message size and model
     work, and records only numeric usage, bounded failure categories, and content-free
-    latency events. Projection has process-local rate and concurrency guards; a multi-worker
-    deployment must also enforce a distributed gateway limit.
+    latency events. Projection has process-local rate and concurrency guards. Production
+    also enforces a Vercel WAF fixed-window limit of six `/api/project` requests per IP per
+    60 seconds, returning 429 before excess work reaches a service worker.
 
 ---
 
@@ -685,10 +686,12 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 **Repository gates are green through item 19.** Track C3 live closeout was reopened by
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
-application acceptance in item 17. Item 19's repository implementation is verified, while
-its intended-platform proof and multi-worker distributed projection guard remain deployment
-closeout work. Migration `0006` and its hosted acceptance are verified. C4(d) remains an
-explicitly deferred stretch and the Track C follow-up backlog below remains open where marked:
+application acceptance in item 17. Item 19's repository implementation, intended-platform
+proof, and multi-worker distributed projection guard are verified. Migration `0006` and its
+hosted acceptance are verified. A signed-in production chat request still requires a real
+user magic-link session; it was not replaced with an agent-created auth fixture. C4(d)
+remains an explicitly deferred stretch and the Track C follow-up backlog below remains open
+where marked:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -955,7 +958,8 @@ explicitly deferred stretch and the Track C follow-up backlog below remains open
     **13-route** production build passed. No dependencies or committed data changed.
 
 19. **P1 — production reliability and error semantics (Repository + hosted database +
-    intended-runtime local proof done 2026-07-15; live hosting closeout open).** Target
+    production hosting and shared limiter verified 2026-07-15; signed-in chat acceptance
+    open).** Target
     resolution now has explicit
     `TargetNotFound`, `UnsupportedTarget`, and `UpstreamResolutionError` categories mapped
     by both planning and visibility routers to 404, structured 422, and 502 respectively.
@@ -972,8 +976,8 @@ explicitly deferred stretch and the Track C follow-up backlog below remains open
     failure reasons. Model work is capped at 55 seconds inside `maxDuration=60`, individual
     steps and chunks have shorter aborts, retries are disabled, and output is capped. The
     60-night projection path runs Astropy in a worker behind bounded process-local rate and
-    concurrency guards. Deployments with multiple workers still require a shared gateway
-    or distributed limiter.
+    concurrency guards. Production adds a shared Vercel WAF fixed-window rule for the
+    expensive proxy path: six `/api/project` requests per IP per 60 seconds, then 429.
 
     Chat restores versioned, validated user/assistant text-only history from local storage;
     tool parts are excluded, unknown versions are discarded, and Clear conversation removes
@@ -1001,9 +1005,31 @@ explicitly deferred stretch and the Track C follow-up backlog below remains open
     surface. Ruff excludes Vercel's generated `.vercel` runtime rather than linting vendored
     code; the full repository gate remained API Ruff/format/mypy + **90 passed / 16
     deselected**, and web typecheck/ESLint + **79 passed / 11 skipped** + the **14-route**
-    optimized build. A real production deployment, its environment variables, authenticated
-    traffic, and the Vercel WAF fixed-window projection rule still require live proof; do
-    not infer those from the local Vercel runtime.
+    optimized build.
+
+    The first real Vercel deployment (`c0285fc`, deployment
+    `dpl_BdYkzHvq9sSnmXFJW5aeDvwKxjtU`) built both services but correctly failed promotion:
+    Vercel Services reject Next's legacy Edge `_middleware` output. Next 16's documented
+    migration was applied by moving the session refresh boundary to `src/proxy.ts` and
+    renaming the export to `proxy`. Commit `917ab46` then deployed successfully as
+    `6BFCcM3ZxTXpAsAbBtDLJowCpen8` in 77 seconds. Vercel Authentication was deliberately
+    disabled at the project layer so `/plan` is public; application chat authentication
+    remains enforced by Supabase. Production and Preview hold only the public Supabase
+    URL/key plus the server-only OpenAI relay configuration; no Supabase service-role key
+    was uploaded. The stable public origin is `https://astro-scout-web.vercel.app`.
+
+    Live production smoke returned `/plan` and `/privacy` 200, missing latitude 400,
+    local M4 200, Simbad-fallback Alpha Centauri 200, unresolved `AAA` structured 404,
+    Sun structured `solar_daylight_planner_required` 422, anonymous chat structured 401,
+    and a correctly parameterized two-night M4 projection 200. Supabase Auth now uses the
+    stable production origin as its Site URL and allows both the production and localhost
+    `/auth/callback` URLs. The published WAF rule was exercised with seven small invalid
+    projection requests: six reached the proxy and returned its expected 400, while the
+    excess request returned 429. Do not infer signed-in production chat/provider success
+    from the anonymous 401 or the rollback-wrapped database acceptance; that final browser
+    acceptance still needs a real magic-link session. Operationally, rotate the configured
+    relay key before treating public chat as cleared: Vercel marked it sensitive, but the
+    import form exposed its value to the browser automation accessibility snapshot.
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 
