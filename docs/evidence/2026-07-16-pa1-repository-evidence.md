@@ -58,13 +58,79 @@ Anonymous planning therefore remained available while the stale-result boundary 
 the built artifact.
 
 The browser harness could set the native date input's DOM value but did not emit the React
-date-change event in this run, so that interaction was not counted as future-date browser
-evidence. The deterministic date/action tests passed, but the required signed-in candidate
-deployment trajectory—future-date rank, projection, save, `/sessions` reload, and exact
-date/coordinate comparison—remains pending deployment authority.
+date-change event in this local run, so that interaction was not counted as future-date
+browser evidence. The deterministic date/action tests passed.
+
+## Hosted Preview trajectory
+
+Commit `765b4f0` on branch `codex/pa1-immutable-plan-context` produced Vercel Preview
+deployment `83aghW2DF2SLFTR4uq6UQmWDfMsb`, which reached **Ready** at
+`https://astro-scout-ixdlskoie-jiayz.vercel.app`. Production was not promoted or changed.
+The direct CLI route was unavailable: `npx --yes vercel@56.2.0 whoami` reported that no
+Vercel credentials were present and then ended with `Error: fetch failed`, so the approved
+Git-integrated Preview path was used.
+
+The anonymous Preview accepted native future-date entry and rendered:
+
+`Plan snapshot: -36.8500, 174.7600 · 2026-08-20 · manual coordinates · no gear profile`
+
+The returned night reported **10.2 h dark**, **61% Moon**, and Bortle 6. Changing latitude
+to `-36.84` immediately removed both the snapshot and target table. Restoring `-36.85` and
+reranking restored the exact `2026-08-20` snapshot, so the hosted future-date and stale-input
+boundaries passed without an account.
+
+The first magic-link attempt resolved on Production because the ephemeral Preview callback
+was not allowlisted. With explicit approval, that exact callback was added while the Site
+URL remained Production. A fresh link then established a real Preview session. The signed-in
+run created and reloaded the temporary `PA-1 acceptance f5` broadband profile, restored SQM
+18.4 and the future date, and rendered:
+
+`Plan snapshot: -36.8500, 174.7600 · 2026-08-20 · manual coordinates · PA-1 acceptance f5 · f/5 · broadband · SQM 18.4`
+
+Coordinate, date, profile-selection, and SQM edits each removed the result, target table,
+Save control, and any projection before reranking. M42 projection returned a 30-night strip,
+`~34.8–69.5 h`, `~16–27 sessions`, best night `2026-09-12`, and the exact same Plan
+snapshot as ranking.
+
+Saving exposed a hosted discrepancy instead of the expected acknowledgement: the database
+insert succeeded as session `b3b545a5-e3ec-45d1-881b-b8fc6232f35f` with `planned_for`
+`2026-08-20` and coordinates `-36.85, 174.76`, but server-action path revalidation
+remounted `/plan` before `Session saved` or post-save logging could remain visible.
+
+Commit `1c39cdc` removes session/observation revalidation that remounted the planner while
+retaining gear revalidation. Its action tests assert no revalidation after successful save
+or observation logging. Focused tests reported **20 passed**; the full web suite reported
+**103 passed / 11 skipped**. The first Turbopack build again failed on sandbox worker-port
+binding; the permitted rerun generated all **14 routes**. Vercel deployment
+`2FA5YPaigXq25LxL1GmQpAPN1xAT` reached Ready and owns the stable branch alias
+`https://astro-scout-web-git-codex-pa1-immutable-plan-context-jiayz.vercel.app`.
+
+With separate approval, the exact stable-alias callback was added to Supabase. The final
+sign-in request was then rejected with `email rate limit exceeded`. The dashboard measured
+the built-in project email quota as **2 emails/h**; it was exhausted by the two earlier
+Preview authentication attempts. The quota was not raised and session credentials were not
+copied between hosts. Corrected save/log/list/detail/reload acceptance therefore remains
+pending the email window reset.
+
+After that window reset, one fresh stable-alias link was sent, but its callback returned
+`access_denied` / `otp_expired`. Work stopped immediately: no further email, deployment,
+configuration, or data mutation occurred until the maintainer approved a recovery path.
+The approved cleanup then:
+
+- removed only the obsolete ephemeral callback and measured **3** remaining URLs:
+  localhost, Production, and the stable branch callback;
+- deleted only failed-run session `b3b545a5-e3ec-45d1-881b-b8fc6232f35f`, guarded by its
+  exact future date and coordinates; SQL `RETURNING` measured **1 row**;
+- retained temporary gear `PA-1 acceptance f5` for the authorized Production acceptance.
+
+The stable callback remains only while the review branch exists. The recovery deliberately
+avoids further Preview magic links: after review and merge, final acceptance will use the
+existing signed-in Production session, followed by temporary-gear cleanup.
 
 ## Disposition
 
-Repository implementation is complete on 2026-07-16. PA-1 remains open until an authorized
-candidate artifact passes the signed-in future-date and changed-input acceptance in
-`docs/live-acceptance.md`.
+Repository implementation, anonymous hosted acceptance, signed-in ranking/invalidation,
+projection, and exact database insertion are complete on 2026-07-16. The failed Preview
+artifacts were removed through the approved admin path. PA-1 remains open until the merged
+Production artifact passes `Session saved`, 120-minute M42 logging, and `/sessions`
+list/detail reload acceptance in `docs/live-acceptance.md`.

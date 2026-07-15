@@ -153,14 +153,22 @@ Record deterministic test names, SQL acceptance where touched, and one built-art
 signed-in browser trajectory using a non-private future date/location. Preserve exact
 observed values rather than copying the historical Auckland run.
 
-### Disposition — repository complete 2026-07-16; hosted acceptance pending
+### Disposition — review/merge authorized 2026-07-16; Production acceptance pending
 
 The immutable successful-plan snapshot, stale-input invalidation/generation guard, exact
 `planned_for` persistence, shared action validation, and discriminated mutation outcomes
-are implemented with deterministic regression coverage. The full API/web gates and a local
-anonymous built-artifact coordinate-invalidation trajectory passed. No schema or RLS change
-was required. PA-1 remains open until an authorized candidate deployment passes the
-signed-in future-date projection/save/reload trajectory. Evidence:
+are implemented with deterministic regression coverage. The full API/web gates, a local
+anonymous built-artifact coordinate-invalidation trajectory, and a Ready Vercel Preview
+future-date/invalidation trajectory passed. No schema or RLS change was required. The
+signed-in Preview passed gear persistence, every mutable-input invalidation, matching M42
+projection, and exact future-date database insertion. That run exposed a server-action
+revalidation remount before the save acknowledgement and logging. Commit `1c39cdc` fixes
+the remount and is Ready on a stable branch alias with its exact callback allowlisted. The
+final Preview auth sequence reached the measured **2 emails/h** quota and later returned
+`otp_expired`; the limit was not raised and credentials were not transferred. The approved
+recovery removed the obsolete callback and failed-run session. PA-1 remains open until the
+merged Production artifact passes visible save, 120-minute M42 logging, and list/detail
+reload through the existing signed-in session. Evidence:
 `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 
 ## PA-2 — make chat target policy complete and action-bounded

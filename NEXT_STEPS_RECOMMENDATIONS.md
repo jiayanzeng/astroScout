@@ -337,12 +337,17 @@ The new ledger is deliberately open:
    signed-in chat/accounting/content-free-log acceptance passed. The preserved operational
    correction and non-secret evidence are recorded in `STATE.md` item 23 and
    `docs/evidence/2026-07-16-pa0-credential-closeout.md`.
-2. [ ] **PA-1 — immutable plan provenance and saved date (repository complete
-   2026-07-16; hosted acceptance pending):** ranking, projection, observer context, and
+2. [ ] **PA-1 — immutable plan provenance and saved date (review/merge authorized
+   2026-07-16; Production acceptance pending):** ranking, projection, observer context, and
    save now share one immutable successful-request snapshot; `planned_for`, action
    validation, and no-row outcomes have deterministic coverage. Close only after an
-   authorized signed-in candidate deployment passes future-date save/reload and
-   changed-input acceptance. See `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
+   the corrected signed-in candidate passes visible save acknowledgement, 120-minute M42 log,
+   and list/detail reload. Ranking, all mutable-input invalidation checks, projection, and
+   the exact future-date database insert passed. The first save exposed a planner remount;
+   commit `1c39cdc` fixes it. Preview authentication later returned `otp_expired`; the
+   approved recovery removed the obsolete callback and failed-run session, and final
+   acceptance is deliberately routed through the existing Production session after merge. See
+   `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 3. [ ] **PA-2 — complete/bounded chat target policy:** cover all 21 supported targets and
    common aliases, preserve Sun/Moon behavior, and ensure required actions plus final
    output fit the declared trajectory budget.

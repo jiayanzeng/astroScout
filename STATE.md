@@ -1271,8 +1271,9 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     because the existing uv cache was not readable, and the first sandboxed Turbopack build
     failed because worker port binding was denied; the permitted reruns passed.
 
-24. ⚠️ **PA-1 — immutable planner provenance (Repository complete 2026-07-16; hosted
-    acceptance pending).** The web now stores each successful `NightPlan` with a frozen
+24. ⚠️ **PA-1 — immutable planner provenance (Repository and anonymous Preview
+    acceptance complete 2026-07-16; signed-in acceptance blocked by Preview auth).** The
+    web now stores each successful `NightPlan` with a frozen
     request snapshot containing coordinates, requested/effective date, location source,
     selected profile identity and gear inputs, and measured SQM. Ranking and projection
     query builders share that snapshot; projection, observer persistence, and save never
@@ -1292,17 +1293,45 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     A local `next start` + FastAPI artifact returned 200 for Auckland. Its snapshot rendered
     `-36.8500, 174.7600`; editing latitude to `-36.80` immediately removed the result/table,
     and reranking rendered `-36.8000, 174.7600`. The browser harness did not emit React's
-    date-change event for the native date control, so that attempt is not counted as
-    future-date browser proof. Deterministic future-date/action tests passed, but the
-    authorized signed-in candidate deployment trajectory—future-date rank, projection,
-    save, and `/sessions` reload with exact date/coordinates—remains required before PA-1
-    closes. Evidence: `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
+    date-change event for the native date control, so that local attempt is not counted as
+    future-date browser proof. Deterministic future-date/action tests passed.
+
+    Commit `765b4f0` produced Ready Vercel Preview
+    `83aghW2DF2SLFTR4uq6UQmWDfMsb` without changing Production. The anonymous Preview
+    rendered the exact Auckland snapshot `-36.8500, 174.7600 · 2026-08-20`; changing
+    latitude to `-36.84` immediately removed the snapshot/table, and restoring the original
+    coordinate plus reranking restored the future-date snapshot. The direct Vercel CLI
+    path was unavailable because no local credentials were present and its check ended in
+    `Error: fetch failed`, so the approved Git-integrated Preview path was used.
+
+    After explicit approval added the exact ephemeral callback, a real Preview session
+    passed gear create/read/selection reload, the exact f/5 broadband + SQM 18.4 snapshot,
+    coordinate/date/profile/SQM invalidation, and M42 projection with a matching snapshot.
+    Save inserted session `b3b545a5-e3ec-45d1-881b-b8fc6232f35f` with exact date
+    `2026-08-20` and Auckland coordinates, but action revalidation remounted `/plan` before
+    `Session saved` or logging could persist visibly.
+
+    Commit `1c39cdc` removes only the session/observation revalidation responsible for that
+    remount and adds a successful-log regression. Web gates passed with **103 passed / 11
+    skipped** and a **14-route** build after the documented sandbox port-binding correction.
+    Ready deployment `2FA5YPaigXq25LxL1GmQpAPN1xAT` owns a stable branch alias, whose exact
+    callback was added with separate approval. A later retry first reached the measured
+    built-in quota of **2 emails/h**, then returned `access_denied` / `otp_expired` after the
+    window reset. The quota was not raised and credentials were not copied between hosts.
+
+    The approved recovery removed only the obsolete ephemeral callback (localhost,
+    Production, and the stable branch callback remain) and deleted the failed-run session
+    with an exact guarded SQL `RETURNING` result of **1 row**. Temporary gear remains solely
+    for the authorized post-merge Production acceptance. Corrected save, 120-minute M42
+    log, and list/detail reload remain required before PA-1 closes. Evidence:
+    `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 
 ### Post-audit production-closeout workstream (opened 2026-07-15)
 
 - [x] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
   the deployed Supabase key class, with no credential value recorded.
-- [ ] **PA-1 planner provenance (repository complete; hosted acceptance pending):** bind
+- [ ] **PA-1 planner provenance (review/merge authorized; Production acceptance pending):**
+  bind
   ranking/projection/save to one immutable request context, persist the actual future
   `planned_for` date, and validate mutation outcomes.
 - [ ] **PA-2 chat target policy:** cover all supported catalog names/aliases and guarantee
