@@ -1271,8 +1271,8 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     because the existing uv cache was not readable, and the first sandboxed Turbopack build
     failed because worker port binding was denied; the permitted reruns passed.
 
-24. ⚠️ **PA-1 — immutable planner provenance (Repository and anonymous Preview
-    acceptance complete 2026-07-16; signed-in acceptance blocked by Preview auth).** The
+24. ⚠️ **PA-1 — immutable planner provenance (Merged and Production Ready 2026-07-16;
+    signed-in Production acceptance pending).** The
     web now stores each successful `NightPlan` with a frozen
     request snapshot containing coordinates, requested/effective date, location source,
     selected profile identity and gear inputs, and measured SQM. Ranking and projection
@@ -1319,18 +1319,28 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     built-in quota of **2 emails/h**, then returned `access_denied` / `otp_expired` after the
     window reset. The quota was not raised and credentials were not copied between hosts.
 
-    The approved recovery removed only the obsolete ephemeral callback (localhost,
-    Production, and the stable branch callback remain) and deleted the failed-run session
-    with an exact guarded SQL `RETURNING` result of **1 row**. Temporary gear remains solely
-    for the authorized post-merge Production acceptance. Corrected save, 120-minute M42
-    log, and list/detail reload remain required before PA-1 closes. Evidence:
+    The approved recovery first removed only the obsolete ephemeral callback and deleted
+    the failed-run session with an exact guarded SQL `RETURNING` result of **1 row**. PR
+    **#1** then merged the reviewed tree as `8455b7108f98208b961b733babe17dc02c948bc9`.
+    Because an automatic merge deployment did not surface, the exact reviewed artifact at
+    `83dc651` was deliberately promoted and rebuilt with Production configuration as Vercel
+    deployment `HfyfLLjpFig1hVnb9LGUztLouHbg`; it reached **Ready** at the stable origin.
+
+    The retained session existed only on the obsolete immutable Preview host; a fresh
+    Production `/plan` load was signed out. No additional magic link was requested and no
+    auth token was copied between hosts. The existing Preview session was used only to
+    delete temporary gear `PA-1 acceptance f5`. The stable branch callback and remote
+    review branch were then removed. Supabase callback measurement now contains exactly
+    localhost and Production. Corrected `Session saved`, 120-minute M42 logging, and
+    `/sessions` list/detail reload are still unverified on the Production origin and remain
+    required before PA-1 closes. Evidence:
     `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 
 ### Post-audit production-closeout workstream (opened 2026-07-15)
 
 - [x] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
   the deployed Supabase key class, with no credential value recorded.
-- [ ] **PA-1 planner provenance (review/merge authorized; Production acceptance pending):**
+- [ ] **PA-1 planner provenance (merged/Production Ready; signed-in acceptance pending):**
   bind
   ranking/projection/save to one immutable request context, persist the actual future
   `planned_for` date, and validate mutation outcomes.

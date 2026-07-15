@@ -115,7 +115,7 @@ pending the email window reset.
 After that window reset, one fresh stable-alias link was sent, but its callback returned
 `access_denied` / `otp_expired`. Work stopped immediately: no further email, deployment,
 configuration, or data mutation occurred until the maintainer approved a recovery path.
-The approved cleanup then:
+The first approved cleanup then:
 
 - removed only the obsolete ephemeral callback and measured **3** remaining URLs:
   localhost, Production, and the stable branch callback;
@@ -123,14 +123,38 @@ The approved cleanup then:
   exact future date and coordinates; SQL `RETURNING` measured **1 row**;
 - retained temporary gear `PA-1 acceptance f5` for the authorized Production acceptance.
 
-The stable callback remains only while the review branch exists. The recovery deliberately
-avoids further Preview magic links: after review and merge, final acceptance will use the
-existing signed-in Production session, followed by temporary-gear cleanup.
+## Merge, Production deployment, and final cleanup
+
+GitHub PR #1 merged the reviewed branch as
+`8455b7108f98208b961b733babe17dc02c948bc9`; its second parent is the final reviewed PA-1
+commit `83dc651`. An automatic merge deployment did not surface in Vercel. The exact
+reviewed `83dc651` artifact was therefore manually promoted and rebuilt with Production
+configuration. Vercel deployment `HfyfLLjpFig1hVnb9LGUztLouHbg` reached **Ready** and owns
+the stable `https://astro-scout-web.vercel.app` origin. The deployment source remains the
+review branch because the promoted artifact is the reviewed second-parent tree; no
+unreviewed source change was introduced.
+
+A fresh Production `/plan` load returned the application but showed `Sign in`: the
+browser's retained Supabase session existed only on the obsolete immutable Preview host.
+No further magic link was requested and no session token was copied between origins. The
+retained Preview session was used only to delete the `PA-1 acceptance f5` gear fixture; the
+profile list then measured `No gear profiles yet`.
+
+The obsolete stable branch callback was removed after merge. The Supabase callback list
+then measured exactly **2** URLs: localhost and Production. The remote
+`codex/pa1-immutable-plan-context` branch was deleted through the merged PR and the PR UI
+measured `Restore branch`. The guarded failed-run session had already been deleted, so no
+PA-1 temporary session or gear fixture remains.
+
+The anonymous Production planner route returned healthy ranked output for Auckland. The
+browser automation again did not dispatch React's native-date change event, so this run is
+not claimed as exact `2026-08-20` Production evidence. The exact future-date boundary
+remains covered by deterministic tests and the earlier Ready Preview trajectory.
 
 ## Disposition
 
-Repository implementation, anonymous hosted acceptance, signed-in ranking/invalidation,
-projection, and exact database insertion are complete on 2026-07-16. The failed Preview
-artifacts were removed through the approved admin path. PA-1 remains open until the merged
-Production artifact passes `Session saved`, 120-minute M42 logging, and `/sessions`
-list/detail reload acceptance in `docs/live-acceptance.md`.
+Repository implementation, merge, Ready Production deployment, anonymous hosted
+acceptance, signed-in Preview ranking/invalidation/projection, exact database insertion,
+and temporary-resource cleanup are complete on 2026-07-16. PA-1 remains open because no
+authenticated Production session was available to verify `Session saved`, 120-minute M42
+logging, and `/sessions` list/detail reload acceptance in `docs/live-acceptance.md`.
