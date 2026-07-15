@@ -1044,7 +1044,27 @@ and the Track C follow-up backlog below remains open where marked:
     live request. Provider-side revocation of the earlier value cannot be proven from the
     application: Vercel marked it sensitive, but the import form exposed it to the browser
     automation accessibility snapshot, so revocation must remain an explicit maintainer
-    confirmation rather than an inferred repository claim.
+    confirmation rather than an inferred repository claim. Follow-up is explicitly deferred
+    and tracked below.
+
+### P1 production credential follow-up (deferred 2026-07-15)
+
+Credential values are intentionally not recorded here, elsewhere in the repository, or in
+task output. These items are documentation-only until the maintainer explicitly resumes them.
+
+- [ ] **`OPENAI_API_KEY` / relay credential — rotate and revoke (high priority):** the
+  server-only value appeared in the Vercel import page's browser accessibility snapshot even
+  though the field was marked sensitive. Revoke the exposed value at the relay provider,
+  create a replacement, update both Vercel Production and Preview, redeploy, and repeat the
+  signed-in chat/accounting/log smoke. Close this item only with provider-side revocation
+  confirmation plus successful use of the replacement; never paste either value into code,
+  documentation, task messages, or logs.
+- [ ] **`NEXT_PUBLIC_SUPABASE_ANON_KEY` — verify key class and boundary (review):** this
+  client-public value appeared in the same snapshot. Exposure alone is expected for an anon
+  or publishable key and is not treated as a secret-key rotation incident. Confirm that the
+  deployed value is the project's anon/publishable credential, never `service_role` or a
+  Supabase secret key, and retain the existing RLS/explicit-grant acceptance as the security
+  boundary. Rotate only if the wrong key class was deployed or incident policy requires it.
 
 ### Track C follow-up backlog (recorded 2026-07-12)
 
