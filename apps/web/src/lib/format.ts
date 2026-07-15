@@ -49,6 +49,26 @@ export function formatLocalDateTime(value: string, timeZone?: string): string {
   }).format(new Date(value));
 }
 
+function shortTimeZoneName(value: string, timeZone: string): string {
+  return (
+    new Intl.DateTimeFormat("en", { timeZone, timeZoneName: "short" })
+      .formatToParts(new Date(value))
+      .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+  );
+}
+
+/** Label the browser/device zone explicitly, including a DST change across the window. */
+export function deviceTimeZoneLabel(
+  duskUtc: string,
+  dawnUtc: string,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+): string {
+  const duskZone = shortTimeZoneName(duskUtc, timeZone);
+  const dawnZone = shortTimeZoneName(dawnUtc, timeZone);
+  const abbreviation = duskZone === dawnZone ? duskZone : `${duskZone} → ${dawnZone}`;
+  return `${timeZone} (${abbreviation})`;
+}
+
 /** Return a concise observing-context label for a Bortle class. */
 export function bortleLabel(bortle: number): string {
   const normalized = Math.min(9, Math.max(1, Math.round(bortle)));

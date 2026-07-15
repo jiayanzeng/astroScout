@@ -1,6 +1,7 @@
 import { tool, type InferUITools, type UIDataTypes, type UIMessage } from "ai";
 import { z } from "zod";
 
+import type { RecordModelUsage } from "@/lib/chat-usage";
 import {
   fetchNightPlan,
   fetchTargetDetail,
@@ -88,6 +89,7 @@ export async function runTargetDetailTool(
 export function createChatTools(
   observer: ObserverContext | null,
   dependencies: ChatToolDependencies = DEFAULT_DEPENDENCIES,
+  recordUsage?: RecordModelUsage,
 ) {
   return {
     planNight: tool({
@@ -118,7 +120,7 @@ export function createChatTools(
       execute: async ({ query, target }): Promise<KnowledgeResult> => ({
         status: "ok",
         tool: "searchKnowledge",
-        passages: await dependencies.knowledge(query, target),
+        passages: await dependencies.knowledge(query, target, { recordUsage }),
       }),
     }),
   };

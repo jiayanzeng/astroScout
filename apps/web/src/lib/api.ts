@@ -30,6 +30,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public detail?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -94,13 +95,18 @@ async function get<T>(path: string, params: Record<string, string | number>): Pr
   if (!res.ok) {
     const body = await res.text();
     let message = `API ${res.status}: ${body}`;
+    let detail: unknown;
     try {
-      const json = JSON.parse(body);
-      if (json.detail) message = String(json.detail);
+      const json = JSON.parse(body) as { detail?: unknown };
+      detail = json.detail;
+      if (typeof detail === "string") message = detail;
+      else if (detail && typeof detail === "object" && "message" in detail) {
+        message = String(detail.message);
+      }
     } catch {
       /* not JSON, use raw body */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, detail);
   }
   return (await res.json()) as T;
 }

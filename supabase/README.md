@@ -3,9 +3,10 @@
 1. Create a project at https://supabase.com and grab the Project URL + anon key.
 2. Run the migrations in order: `0001_init.sql` → `0002_knowledge.sql` →
    `0003_hybrid_search.sql` → `0004_gear_profiles.sql` →
-   `0005_privileges_and_rls_repair.sql`. Paste each file into the SQL editor, or use the
-   Supabase CLI (`supabase db push`). `0005` is safe to reapply and is required for both
-   existing and new projects; it makes API-role privileges explicit.
+   `0005_privileges_and_rls_repair.sql` → `0006_chat_usage_limits.sql`. Paste each file
+   into the SQL editor, or use the Supabase CLI (`supabase db push`). `0005` is safe to
+   reapply and is required for both existing and new projects; it makes API-role
+   privileges explicit.
 3. Put the keys in `apps/web/.env.local`:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -16,6 +17,18 @@ RLS is enabled on all user-owned tables; every row is scoped to `auth.uid()`, an
 observation can reference only a session owned by that same user. Migration `0005`
 revokes anonymous user-table access and grants authenticated CRUD explicitly, so the anon
 key remains safe to ship to the browser. Never put the service-role key in the web app.
+
+## Authenticated chat quota and usage records (P1)
+
+`migrations/0006_chat_usage_limits.sql` adds a user-owned, content-free usage table and
+two authenticated RPCs. `reserve_chat_request` serializes quota reservations per user so
+concurrent requests cannot bypass the configured minute/day caps;
+`complete_chat_request` records status, latency, token totals, backend billing units, and
+estimated cost. Neither the table nor the RPCs accept prompt text, response text, tool
+payloads, emails, or secrets. Authenticated users may read only their own usage rows and
+cannot write them directly. Each reservation also returns a random completion capability
+that remains server-side; its stored value is not selectable by authenticated clients, so
+a browser cannot overwrite the route's real accounting row.
 
 ## Knowledge base (v0.2)
 
@@ -49,5 +62,6 @@ Do not replace it with dashboard-only grants: applying the migration keeps hoste
 replayable.
 
 CI boots PostgreSQL 16 with pgvector, applies every migration, reapplies `0005` to prove
-idempotency, and runs `tests/track_c_acceptance.sql` for owner CRUD, cross-user denial,
-cross-session denial, and an authenticated `hybrid_search` call.
+idempotency, and runs `tests/track_c_acceptance.sql` plus
+`tests/chat_usage_acceptance.sql` for owner CRUD, cross-user denial, quota enforcement,
+content-free completion accounting, and authenticated RPC calls.

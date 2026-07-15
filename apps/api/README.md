@@ -9,20 +9,30 @@ uv sync
 uv run uvicorn astroscout_api.main:app --reload   # http://127.0.0.1:8000/docs
 ```
 
-## Endpoints (Week 1)
+## Endpoints
 
 - `GET /health` → `{"status": "ok"}`
 - `GET /visibility?target=M31&lat=-36.85&lon=174.76` → altitude, transit, moon, rating
+- `GET /plan/night?lat=&lon=&when=` → dark window + ranked local catalog
+- `GET /plan/target?name=&lat=&lon=&when=` → one catalog/Simbad target
+- `GET /plan/project?name=&lat=&lon=&f_ratio=&nights=` → bounded multi-night projection
+
+Target resolution is catalog-first. Unknown names return 404, known targets that require
+a different product flow return a structured 422, and actual Simbad/network failures return
+502. The Moon is a moving observing target; Sun/Sol returns the daylight/solar-safety flow
+instead of entering the night planner. Projection work runs off the async loop behind
+process-local concurrency and request-rate guards; multi-worker deployments also need a
+shared gateway/distributed limit.
 
 ## Data sources
 
 | source | adapter | needs token | notes |
 |---|---|---|---|
-| Simbad (CDS) name→coords | `datasources/catalog.py` | no | column names vary across astroquery versions |
-| Visibility / transit | `datasources/visibility.py` | no | astropy + astroplan; times are UTC |
+| Simbad (CDS) name→coords | `datasources/targets.py`, `catalog.py` | no | explicit not-found versus outage errors |
+| Visibility / transit | `datasources/visibility.py` | no | local moving/fixed targets, then Simbad; UTC |
 | Darkness / moon | `datasources/visibility.py` | no | sun set, astronomical dusk, moon illumination |
 | NASA ADS literature | `datasources/literature.py` | **yes** (`ADS_TOKEN`) | free token, rate-limited |
-| Light pollution | — | — | **known gap: no clean free API.** MVP uses altitude + moon only |
+| Light pollution | `bortle/grid.py` | no | committed World Atlas Bortle/SQM grids |
 
 ## Day-6 scorecard (fill in after running `scripts/validate_sources.py`)
 
@@ -33,12 +43,14 @@ uv run uvicorn astroscout_api.main:app --reload   # http://127.0.0.1:8000/docs
 | M42 | | | | | |
 | Jupiter | | | | | |
 
-## Planning endpoints (v0.1)
+## Planning behavior
 
 - `GET /plan/night?lat=&lon=` → dark window + scored, ranked catalog of targets
   for the upcoming astronomical night.
 - `GET /plan/target?name=&lat=&lon=` → detailed night conditions for one target
   (built-in catalog first, else Simbad name resolution).
+- `GET /plan/project?name=&lat=&lon=&f_ratio=&nights=` → a rate/concurrency-protected
+  multi-night visibility and integration-time projection (maximum 60 nights).
 
 Scoring is a pure, unit-tested function (`scoring.py`): altitude (extinction),
 hours above the useful-altitude floor during darkness, and moon interference

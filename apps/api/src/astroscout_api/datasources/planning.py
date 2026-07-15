@@ -34,7 +34,8 @@ from ..scoring import (
     rate_target,
     score_target,
 )
-from .dso_catalog import CATALOG, CatalogObject, get
+from .dso_catalog import CATALOG, CatalogObject
+from .targets import resolve_target
 
 
 def _observer(lat: float, lon: float) -> Observer:
@@ -130,6 +131,7 @@ def conditions_for(
         hours_visible=round(hours_visible, 1),
         bortle=bortle,
         light_sensitivity=light_sensitivity_for_kind(obj.kind),
+        is_moon=obj.body == "moon",
     )
 
 
@@ -139,30 +141,12 @@ def _row(obj: CatalogObject, c: TargetConditions) -> dict[str, object]:
         "common_name": obj.common_name,
         "kind": obj.kind,
         "score": score_target(c),
-        "rating": rate_target(c.altitude_deg, c.moon_illumination),
+        "rating": rate_target(c.altitude_deg, 0.0 if obj.body == "moon" else c.moon_illumination),
         "peak_altitude_deg": c.altitude_deg,
         "hours_visible": c.hours_visible,
         "moon_separation_deg": c.moon_separation_deg,
         "light_sensitivity": c.light_sensitivity,
     }
-
-
-def _resolve_target(name: str) -> CatalogObject:
-    """Resolve a catalog target locally, falling back to Simbad."""
-    obj = get(name)
-    if obj is not None:
-        return obj
-
-    from astroplan import FixedTarget
-
-    ft = FixedTarget.from_name(name)
-    return CatalogObject(
-        name=name,
-        ra_hours=float(ft.coord.ra.hour),
-        dec_deg=float(ft.coord.dec.deg),
-        kind="unknown",
-        common_name=name,
-    )
 
 
 def _resolve_sky(lat: float, lon: float, sqm: float | None) -> tuple[float | None, str]:
@@ -220,7 +204,7 @@ def rank_targets(
 
 def target_detail(name: str, lat: float, lon: float, when: Time | None = None) -> dict[str, object]:
     """Full conditions for one target (catalog first, else Simbad)."""
-    obj = _resolve_target(name)
+    obj = resolve_target(name)
     window = dark_window(lat, lon, when)
     bortle = bortle_at(lat, lon)
     c = conditions_for(obj, lat, lon, window, bortle)
@@ -249,7 +233,7 @@ def project_target(
     default is roughly twice the cost of one ``rank_targets`` call; the router's
     60-night validation bound limits that work.
     """
-    obj = _resolve_target(name)
+    obj = resolve_target(name)
     bortle = bortle_at(lat, lon)
     sky_sqm, sky_source = _resolve_sky(lat, lon, sqm)
     estimate = hours_needed(obj.kind, bortle, f_ratio, filter_kind, tier, sqm=sky_sqm)
@@ -269,11 +253,15 @@ def project_target(
             window = dark_window(lat, lon, night_anchor)
 
         conditions = conditions_for(obj, lat, lon, window, bortle)
-        usable = usable_hours(
-            conditions.hours_visible,
-            conditions.moon_illumination,
-            conditions.moon_separation_deg,
-            filter_kind,
+        usable = (
+            conditions.hours_visible
+            if obj.body == "moon"
+            else usable_hours(
+                conditions.hours_visible,
+                conditions.moon_illumination,
+                conditions.moon_separation_deg,
+                filter_kind,
+            )
         )
         usable_by_night.append(usable)
         projected.append(

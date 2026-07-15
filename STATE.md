@@ -82,6 +82,7 @@ astroscout/
 │       │                              #   env_file anchored to repo root (§4 quirks)
 │       ├── budget.py                  # PURE integration-time ranges + visible assumptions
 │       ├── params.py                  # shared validated query types: coords/time/projection gear
+│       ├── protection.py              # projection rate + concurrency guards
 │       ├── scoring.py                 # PURE scorer + light-pollution linkage  ★core
 │       ├── bortle/                    # OFFLINE light-pollution lookup  ★core (v0.6)
 │       │   ├── calibration.py         #   PURE Bortle↔SQM single authority + midpoints
@@ -91,9 +92,10 @@ astroscout/
 │       │   ├── bortle_grid.npy        #   COMMITTED uint8 grid (720×1440, 0.25°, ~1MB) — World Atlas 2015 q3
 │       │   └── sqm_grid.npy           #   COMMITTED float16 SQM sidecar (720×1440, ~2MB), same run
 │       ├── datasources/
-│       │   ├── dso_catalog.py         # 15 fixed DSOs + Jupiter/Saturn/Mars/Venus (moving bodies)
+│       │   ├── dso_catalog.py         # 16 fixed DSOs + four planets + Moon
 │       │   ├── planning.py            # dark window + fixed/moving-body visibility/ranking ★core
-│       │   ├── visibility.py          # get_visibility (Simbad), get_darkness
+│       │   ├── targets.py             # explicit local/Simbad resolution domain errors
+│       │   ├── visibility.py          # local/Simbad visibility + moving targets, get_darkness
 │       │   ├── catalog.py             # resolve_object via Simbad/astroquery
 │       │   └── literature.py          # resolve_object_query (ADS object svc → Solr fields),
 │       │                              #   fallback_query, count_literature, fetch_abstracts ★(v0.6.1)
@@ -106,6 +108,7 @@ astroscout/
 │       │   └── ingest.py              # ingest_target / ingest_catalog (fetch→chunk→embed→store)
 │       └── routers/
 │           ├── health.py              # GET /health
+│           ├── errors.py              # target-domain HTTP mapping
 │           ├── visibility.py          # GET /visibility?target=&lat=&lon=   (Lat/Lon validated)
 │           └── planning.py            # GET /plan/night, /plan/target, /plan/project
 │   └── tests/                         # see §4 for what's CI vs integration
@@ -114,6 +117,8 @@ astroscout/
 │       ├── test_bortle.py             # model, Bortle/SQM grid math + calibration  [11]
 │       ├── test_parse_when.py         # date/datetime parsing  [4]
 │       ├── test_routers.py            # 422 validation (CI, 13) + future-date (integration, 2)
+│       ├── test_target_resolution.py  # catalog/Simbad/error categories
+│       ├── test_protection.py         # projection rate/concurrency guards
 │       ├── test_chunking.py           # RAG chunker  [6]
 │       ├── test_literature.py         # ADS resolver translation + fallbacks (CI, 6)
 │       │                              #   + live round-trips (integration, 3)  ★(v0.6.1)
@@ -134,7 +139,8 @@ astroscout/
 │       │   ├── sessions/ page.tsx + [id]/page.tsx             # saved sessions + logs
 │       │   ├── login/page.tsx         # magic-link sign-in
 │       │   ├── auth/callback/route.ts + signout/route.ts
-│       │   ├── chat/page.tsx          # copilot: renders typed tool-call cards + sources
+│       │   ├── chat/page.tsx          # authenticated copilot + text-only local history
+│       │   ├── privacy/page.tsx       # chat storage/provider/accounting disclosure
 │       │   ├── api/{chat,plan,project,visibility}/route.ts    # AI SDK route + proxies
 │       │   ├── layout.tsx, globals.css (Tailwind v4 + shadcn tokens)
 │       ├── components/ui/             # button, input, card, badge (shadcn new-york)
@@ -146,6 +152,8 @@ astroscout/
 │           ├── observer-context.ts    # validated persisted /plan coordinates/date/source ★
 │           ├── chat-policy.ts         # deterministic required-tool trajectory policy ★
 │           ├── grounded-response.ts   # suppress model science prose; cited corpus excerpts ★
+│           ├── chat-{guard,persistence,usage,usage-store}.ts # bounds/history/accounting
+│           ├── proxy-params.ts, structured-log.ts # proxy validation + content-free events
 │           ├── format.ts, utils.ts + __tests__/ (incl. observer/tool/policy/stream tests)
 │           └── supabase/{client,server,types}.ts
 │   └── evals/                         # eval harness (offline-runnable)  ★
@@ -171,10 +179,12 @@ astroscout/
     │   ├── 0002_knowledge.sql         # vector ext + documents + match_documents RPC (public-read RLS)
     │   ├── 0003_hybrid_search.sql     # fts tsvector + GIN + hybrid_search RRF RPC
     │   ├── 0004_gear_profiles.sql     # minimal user-owned f-ratio/filter profiles + RLS
-    │   └── 0005_privileges_and_rls_repair.sql  # explicit API grants + observation ownership
+    │   ├── 0005_privileges_and_rls_repair.sql  # explicit API grants + observation ownership
+    │   └── 0006_chat_usage_limits.sql  # authenticated quotas + content-free usage accounting
     └── tests/
         ├── bootstrap.sql              # disposable PostgreSQL Supabase-role shim
-        └── track_c_acceptance.sql     # grants + CRUD + cross-user RLS + hybrid RPC
+        ├── track_c_acceptance.sql     # grants + CRUD + cross-user RLS + hybrid RPC
+        └── chat_usage_acceptance.sql  # quota, accounting, and cross-user denial
 ```
 
 ### Web dependency versions (resolved, latest-stable)
@@ -222,13 +232,17 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 5. **Validate before astropy.** Shared `Lat`/`Lon` `Annotated` query params (`params.py`)
    enforce bounds (±90 / ±180) on BOTH planning and visibility routers → 422 before any
    astropy call. Projection also validates f-ratio `(0,32]`, nights `[1,60]`, optional SQM
-   `[15,22.1]`, and filter/tier Literals before compute. `when` parse errors → 422;
-   downstream failures → 502.
+   `[15,22.1]`, and filter/tier Literals before compute. `when` parse errors → 422.
+   Target resolution has explicit domain semantics: unresolved names → 404, targets that
+   require a different product flow → structured 422, and actual CDS/Simbad/network
+   failures → 502. Next proxies validate presence before numeric conversion, so omitted
+   coordinates cannot silently become zero.
 6. **Embedding model pinned on both sides.** Ingestion (Python) and retrieval (web) both
    use `text-embedding-3-small` (1536-d). A mismatch is a silent RAG bug — never diverge.
    Relay corollary (v0.6.1): if `OPENAI_BASE_URL` points at a relay, the relay must serve
    this exact model on **both** sides; point both sides at the same endpoint.
-7. **RLS model.** `sessions` + `logged_observations` + `gear_profiles` are
+7. **RLS model.** `sessions` + `logged_observations` + `gear_profiles` +
+   `chat_usage_events` are
    **user-scoped** (`auth.uid()`). Observation insert/update also proves that the
    referenced session belongs to the same authenticated user. SQL privileges are
    explicit in `0005`; RLS policies do not replace grants. `documents` (knowledge base)
@@ -250,6 +264,11 @@ eslint ^9.39 (NOT 10 — see §2) · vitest ^4.1 · tsx ^4.22`.
 11. **Vendor endpoints are configuration, not code.** Relay/base-URL switching lives in
     env (`OPENAI_BASE_URL`) with the official endpoint as the in-code default. Never
     hardcode a relay URL; never commit `.env` / `.env.local`.
+12. **Public compute is authenticated and bounded.** Chat requires a verified Supabase
+    user, reserves an atomic per-user database quota, caps request/message size and model
+    work, and records only numeric usage, bounded failure categories, and content-free
+    latency events. Projection has process-local rate and concurrency guards; a multi-worker
+    deployment must also enforce a distributed gateway limit.
 
 ---
 
@@ -384,9 +403,10 @@ slightly ahead, still consistent with “no discernible difference.”
 - `CatalogObject(name,ra_hours,dec_deg,kind,common_name,body=None)`. Fixed targets use
   J2000 RA/Dec; a non-null `body` is an Astropy solar-system body name and makes those
   coordinate fields unused placeholders.
-- `CATALOG` now has 19 rows: the original 15 DSOs plus Jupiter, Saturn, Mars, and Venus,
-  all with `kind="planet"` and lowercase body identifiers. `get(name)` remains
-  case-insensitive and resolves the new planet names locally before any Simbad fallback.
+- `CATALOG` now has 21 rows: the original 15 DSOs, M4, Jupiter, Saturn, Mars, Venus, and
+  the Moon. Planets use `kind="planet"`; the Moon uses `kind="moon"`; all moving targets
+  have lowercase Astropy body identifiers. `get(name)` remains case-insensitive and
+  resolves these names locally before any Simbad fallback. The Sun is deliberately absent.
 
 ### `datasources/planning.py`
 - `parse_when(str|None)->Time|None`: None/empty→None; date-only → append `T12:00:00`
@@ -399,19 +419,22 @@ slightly ahead, still consistent with “no discernible difference.”
   Moon's GCRS frame; this removes transform-direction ambiguity and the former
   `NonRotationTransformationWarning` flood. Astropy's built-in ephemeris is
   planning-grade, not precision astrometry, and needs no network. Sets `bortle` and
-  kind sensitivity.
+  kind sensitivity. The Moon is scored as a moving observing target without penalizing
+  itself for zero lunar separation; it is excluded from deep-sky integration budgets.
 - `rank_targets(lat,lon,when=None, f_ratio=None, filter_kind="broadband", tier="clean",
-  sqm=None)` ranks all 19 local targets → `{dusk_utc, dawn_utc, dark_hours,
+  sqm=None)` ranks all 21 local targets → `{dusk_utc, dawn_utc, dark_hours,
   moon_illumination, bortle, targets:[{name, common_name, kind, score, rating,
   peak_altitude_deg, hours_visible, moon_separation_deg, light_sensitivity}]}` sorted by score.
   With no f-ratio its payload remains unchanged. With gear, sky is resolved once using
   user SQM → sidecar → class precedence, top-level `sky_sqm/sky_source` are added, and
   every row gains low/high hours, filter mismatch, and budget applicability using pure
   C1 math without another astropy calculation.
-- `target_detail(name,lat,lon,when=None)` → same row + dark_hours/moon/bortle; falls back
-  to `FixedTarget.from_name` (Simbad) for non-catalog names.
-- `_resolve_target` is the shared catalog-first/Simbad-fallback resolver used by detail and
-  projection. `project_target(...)` resolves Bortle once, prefers user SQM over the sidecar
+- `target_detail(name,lat,lon,when=None)` → same row + dark_hours/moon/bortle. Shared
+  `resolve_target` returns local fixed/moving targets first, then uses Simbad for supported
+  names. `TargetNotFound`, `UnsupportedTarget`, and `UpstreamResolutionError` distinguish
+  missing objects, product-flow exclusions, and resolver outages. Sun/Sol returns the
+  structured `solar_daylight_planner_required` flow instead of entering the night planner.
+- `project_target(...)` resolves Bortle once, prefers user SQM over the sidecar
   over the Bortle-class crosswalk, records that source, and projects one conditions sample
   per consecutive dusk (duplicate dusk windows are skipped). Each night exposes UTC
   dusk/dawn, dark/visible/usable hours, and lunar conditions; the response also exposes
@@ -428,6 +451,10 @@ slightly ahead, still consistent with “no discernible difference.”
   broadband, clean, 30 nights, and grid/class SQM; Literal and bound failures return 422.
   `/plan/night` also accepts optional `f_ratio/filter/tier/sqm`; omitting f-ratio preserves
   the legacy response exactly, while providing it activates per-row budget fields.
+  Target errors map to 404/422/502 with stable structured details. `/plan/project` runs
+  Astropy work off the async loop behind a two-request process semaphore plus per-peer and
+  process-wide sliding-window limits; saturation returns 503 and quota
+  exhaustion returns 429 with `Retry-After`.
 
 ### Web `lib`
 - `api.ts` types: `NightPlan` includes Bortle plus optional sky provenance and row budget
@@ -464,12 +491,24 @@ slightly ahead, still consistent with “no discernible difference.”
   unsupported memory answer. `grounded-response.ts` removes all model-authored science
   text chunks while preserving tool cards, then emits at most three 24-word cited corpus
   excerpts. Empty/incompletely attributed results emit the exact insufficient-evidence
-  message. Chat route still uses
+  message. Chat route uses
   `await convertToModelMessages(...)` (v6 is async), `stopWhen: stepCountIs(6)`,
   `toUIMessageStreamResponse()`, and the stateless `openai.chat("gpt-4o-mini")` provider
-  for multi-step tool loops. Client uses `useChat<ChatMessage>()` + `sendMessage({text})`,
-  ignores incomplete/unrecognized tool parts, and exposes retry plus a fresh-send path
-  after stream errors.
+  for multi-step tool loops. It requires `supabase.auth.getUser()`, rejects bodies over
+  64 KiB and oversized message histories, atomically reserves the `0006` per-user quota,
+  caps total work at 55 seconds within `maxDuration=60`, and accounts for chat, embedding,
+  LLM rerank, or Cohere usage. Structured request/step/tool logs contain timing, status,
+  and bounded failure reasons only—never message text, tool payloads, keys, or secrets.
+  Client uses `useChat<ChatMessage>()` + `sendMessage({text})`, ignores incomplete/
+  unrecognized tool parts, and exposes retry plus a fresh-send path after stream errors.
+- `proxy-params.ts`: shared presence-first, finite-number, coordinate, f-ratio, night, and
+  SQM checks for all Next API proxies; invalid client parameters return structured 400s.
+- `chat-persistence.ts`: versioned local text-only history validation. It restores the most
+  recent bounded user/assistant text parts after reload/navigation, rejects unknown schema
+  versions, never stores tool parts, and backs the visible Clear conversation action.
+- `format.ts`: plan dusk/dawn is labelled with the explicit device IANA zone and current
+  abbreviation (including a DST transition label when applicable); the exact UTC value
+  remains in the tooltip. Observing-site IANA derivation remains an open preferred follow-up.
 - Relay note (v0.6.1, corrected 2026-07-11): web OpenAI providers read
   `OPENAI_API_KEY` **and** `OPENAI_BASE_URL` from env — set both in `.env.local` to route
   through a relay. The original live check established that the configured relay supports
@@ -481,9 +520,9 @@ slightly ahead, still consistent with “no discernible difference.”
 - Track W2 web shell/UX (2026-07-11): `layout.tsx` is still a server component and now
   renders a sticky one-row Plan/Sessions/Chat shell with Supabase-aware sign-in or
   email/sign-out affordances. The root applies the existing `.dark` token set by default.
-  `/plan` adds guarded browser geolocation (coordinates rounded to two decimals), local
-  dusk/dawn formatting with the UTC values retained in `title`, a labelled/color-coded
-  Bortle badge, kind filters, score bars, top-row emphasis, loading skeletons, and a
+  `/plan` adds guarded browser geolocation (coordinates rounded to two decimals), explicit
+  device-zone dusk/dawn formatting with the UTC values retained in `title`, a labelled/
+  color-coded Bortle badge, kind filters, score bars, top-row emphasis, loading skeletons, and a
   mobile-hidden hours column. Pure `formatLocalDateTime` and `bortleLabel` helpers are
   unit-tested. `/chat` adds three starter prompts and smooth auto-scroll while preserving
   W1's defensive tool rendering and error recovery. No dependencies or API payloads changed.
@@ -517,9 +556,15 @@ slightly ahead, still consistent with “no discernible difference.”
 - `0005`: explicit `anon`/`authenticated`/`service_role` table, sequence, schema, and RPC
   privileges; removes anonymous access to user-owned tables and public RPC execution;
   strengthens observation insert/update so `session_id` must name the same user's session.
-  Run order: 0001 → 0002 → 0003 → 0004 → 0005. CI replays the full chain in PostgreSQL
-  with pgvector, reapplies `0005` to prove idempotency, and tests owner CRUD, cross-user
-  denial, cross-session denial, and one authenticated `hybrid_search` call.
+- `0006`: `chat_usage_events` plus security-definer `reserve_chat_request` and
+  `complete_chat_request` RPCs. Per-user advisory locks make minute/day reservations atomic;
+  RLS exposes only the caller's rows. Stored fields are numeric token/cost/timing totals,
+  constrained backend/status values, a short failure reason, and a nonselectable random
+  completion capability—no generic JSON or content. The capability stays inside the server
+  route so an authenticated browser cannot overwrite a real request's accounting row.
+  Run order: 0001 → 0002 → 0003 → 0004 → 0005 → 0006. CI replays the full chain
+  in PostgreSQL with pgvector, reapplies `0005` to prove idempotency, tests owner CRUD and
+  cross-user/session denial, then tests chat quota, usage completion, and cross-user denial.
 
 ### Eval harness numbers (offline, deterministic stand-ins)
 ```
@@ -582,10 +627,10 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `pytest -m "not integration"`.
   - `web`: `pnpm install --frozen-lockfile` → `pnpm --filter @astroscout/web
     lint|typecheck|test|build`. Job sets `npm_config_verify_deps_before_run=false`.
-- **Current status:** API verified 2026-07-15: **72 unit tests pass**, 16 deselected as
+- **Current status:** API verified 2026-07-15: **90 unit tests pass**, 16 deselected as
   integration; `ruff check`, `ruff format --check`, and `mypy src` are clean. Current
-  web source passes typecheck, lint, and the 13-route production build. No-key Vitest:
-  **61 passed + 11 live cases skipped** (six canned faithfulness + five agent trajectory).
+  web source passes typecheck, lint, and the 14-route production build. No-key Vitest:
+  **79 passed + 11 live cases skipped** (six canned faithfulness + five agent trajectory).
   Live B3 remains **6/6 passed**; the new live trajectory gate is **5/5 passed** after
   the corpus-only response policy. The B2 live A/B is recorded above (§5 item 6).
 - **How to verify locally**:
@@ -615,9 +660,12 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
     `apps/web` once after install, or Next.js may crash on missing native binaries.
     (In the CI/sandbox environments the warning is cosmetic — prebuilt binaries ship.)
   - If a local HTTPS-intercepting proxy (Clash/VPN) breaks Node TLS
-    (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`), `NODE_TLS_REJECT_UNAUTHORIZED=0` in
-    `apps/web/.env.local` unblocks dev. **Local-only escape hatch — never commit or
-    deploy it**; the clean fix is `NODE_EXTRA_CA_CERTS=<proxy-CA.pem>`.
+    (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`), export the verified proxy/root CA bundle with
+    `NODE_EXTRA_CA_CERTS=<proxy-CA.pem>` in the machine shell or launch environment.
+    Never set `NODE_TLS_REJECT_UNAUTHORIZED=0`, and never place machine CA settings in a
+    committed env file. On 2026-07-15 this machine verified canned chat, embedding,
+    reranking, and Supabase traffic under normal certificate validation with a two-root
+    machine-only bundle.
   - **pydantic-settings env_file anchored to repo root** (fixed 2026-07-09, §5 item 1).
     Env-file paths are absolute, derived from `config.py`'s own location — no longer
     dependent on the process CWD. The tuple `(_REPO_ROOT / ".env", apps/api/.env)` means
@@ -635,10 +683,12 @@ explicit opt-in and the production Cohere → LLM → pass-through default is un
 
 ## 5. Immediate next steps & unresolved items
 
-**Repository gates are green through item 18.** Track C3 live closeout was reopened by
+**Repository gates are green through item 19.** Track C3 live closeout was reopened by
 the 2026-07-15 maintainer transcript and restored by the measured P0 database + signed-in
-application acceptance in item 17. C4(d) remains an explicitly deferred stretch and the
-Track C follow-up backlog below remains open where marked:
+application acceptance in item 17. Item 19's repository implementation is verified, while
+its hosted migration and intended-platform proof remain deployment closeout work. C4(d)
+remains an explicitly deferred stretch and the Track C follow-up backlog below remains open
+where marked:
 
 0. ✅ **Restore CI green — `rag/embeddings.py` lint/format fixed (Done 2026-07-10).**
    The over-long comment was shortened (now ≤100 chars) and trailing whitespace
@@ -904,6 +954,45 @@ Track C follow-up backlog below remains open where marked:
     ESLint clean, no-key Vitest **61 passed + 11 skipped**, live agent **5/5**, and the
     **13-route** production build passed. No dependencies or committed data changed.
 
+19. **P1 — production reliability and error semantics (Repository implementation done
+    2026-07-15; deployment closeout open).** Target resolution now has explicit
+    `TargetNotFound`, `UnsupportedTarget`, and `UpstreamResolutionError` categories mapped
+    by both planning and visibility routers to 404, structured 422, and 502 respectively.
+    `AAA` exercises the missing-name path; M4 resolves locally and Alpha Centauri preserves
+    the Simbad fallback. The Moon is a moving, self-penalty-free observing target with no
+    deep-sky budget; Sun/Sol returns `solar_daylight_planner_required` and never enters the
+    night planner. Next plan/project/visibility proxies check presence before conversion
+    and reject missing, non-finite, and out-of-range values instead of coercing absence to
+    zero.
+
+    `/api/chat` now requires a valid Supabase user, bounds bytes/history/message lengths,
+    atomically reserves configurable per-user minute/day quotas through migration `0006`,
+    and records numeric token/cost totals plus content-free step/tool latency and bounded
+    failure reasons. Model work is capped at 55 seconds inside `maxDuration=60`, individual
+    steps and chunks have shorter aborts, retries are disabled, and output is capped. The
+    60-night projection path runs Astropy in a worker behind bounded process-local rate and
+    concurrency guards. Deployments with multiple workers still require a shared gateway
+    or distributed limiter.
+
+    Chat restores versioned, validated user/assistant text-only history from local storage;
+    tool parts are excluded, unknown versions are discarded, and Clear conversation removes
+    the stored copy. `/privacy` documents the local storage/provider boundary. `/plan` now
+    labels dusk/dawn as the explicit device IANA zone/abbreviation with UTC tooltips; tests
+    cover Auckland viewed from Los Angeles across date rollover and PDT→PST. Deriving the
+    observing site's own IANA zone remains the preferred product follow-up.
+
+    The insecure local TLS override was removed. This machine now exports a machine-only
+    two-root bundle through `NODE_EXTRA_CA_CERTS`; canned chat, embedding, reranking, and
+    Supabase traffic passed with normal certificate validation. Repository gates are clean:
+    API Ruff/format/mypy plus **90 passed / 16 deselected**; web typecheck/ESLint plus
+    **79 passed + 11 skipped** and a **14-route** optimized production build. Local
+    `next start` artifact smoke returned `/plan` 200, `/privacy` 200, invalid proxy 400,
+    and anonymous chat 401. The current environment has no local PostgreSQL, so the `0006`
+    SQL acceptance is executable CI coverage, not a locally observed database pass. The
+    hosted project has not received `0006`, and the intended cloud hosting environment was
+    not exercised because no deployment configuration/CLI/credentials are present; those
+    two deployment proofs must remain open rather than being inferred from local `next start`.
+
 ### Track C follow-up backlog (recorded 2026-07-12)
 
 - **Polar dark-window handling (open, low priority):** replace predictable 502 responses
@@ -933,7 +1022,8 @@ ones fail purely due to blocked network — expected.
 ## 6. How to run the whole thing (live)
 
 ```bash
-# 1. Supabase: create project; run migrations 0001→0002→0003→0004→0005; enable email auth;
+# 1. Supabase: create project; run migrations 0001→0002→0003→0004→0005→0006;
+#    enable email auth;
 #    allow http://localhost:3000/auth/callback
 #    SUPABASE_URL = bare project URL (no /rest/v1). A 42501 means migration 0005 is
 #    missing or the hosted schema has drifted; do not patch privileges out of band.
@@ -948,9 +1038,11 @@ pnpm install
 pnpm --dir apps/web approve-builds                       # sharp/esbuild native builds (local machines)
 cp apps/web/.env.example apps/web/.env.local             # Supabase URL/anon + OPENAI (+ COHERE)
                                                          # optional: OPENAI_BASE_URL=<relay>/v1
+# If a local intercepting proxy needs a private/root CA, export NODE_EXTRA_CA_CERTS to a
+# verified machine-only PEM bundle before starting Node. Never disable TLS verification.
 # Optional local reranker: install @huggingface/transformers as a dev-only package,
 # then set RERANK_BACKEND=bge. First use downloads/caches the quantized public model.
 pnpm --filter @astroscout/web dev                        # http://localhost:3000
 ```
-`/plan` works without auth; sign-in (magic link) unlocks save/log; `/chat` needs
-`OPENAI_API_KEY` and an ingested corpus for grounded answers.
+`/plan` works without auth; sign-in (magic link) unlocks save/log and `/chat`. Chat also
+needs migration `0006`, `OPENAI_API_KEY`, and an ingested corpus for grounded answers.

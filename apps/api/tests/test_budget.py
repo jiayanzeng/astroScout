@@ -99,6 +99,10 @@ def test_usable_hours_applies_filter_weighted_moon_penalty() -> None:
 
 def test_planets_are_not_long_integration_budget_targets() -> None:
     assert hours_needed("planet", 9, 5.0) is None
+
+
+def test_moon_is_not_a_deep_sky_integration_budget_target() -> None:
+    assert hours_needed("moon", 4, 5.0) is None
     assert hours_needed("PLANET", 9, 5.0) is None
 
 

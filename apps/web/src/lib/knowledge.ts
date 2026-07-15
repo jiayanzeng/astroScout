@@ -2,6 +2,7 @@ import { openai } from "@ai-sdk/openai";
 import { createClient } from "@supabase/supabase-js";
 import { embed } from "ai";
 
+import { openAIUsage, type RecordModelUsage } from "./chat-usage";
 import { rerankPassages, type RerankBackend } from "./rerank";
 
 export type KnowledgePassage = {
@@ -100,11 +101,13 @@ export function deduplicatePassages(passages: KnowledgePassage[]): KnowledgePass
 export async function retrieveKnowledgeCandidates(
   query: string,
   target?: string,
+  recordUsage?: RecordModelUsage,
 ): Promise<KnowledgePassage[]> {
-  const { embedding } = await embed({
+  const { embedding, usage } = await embed({
     model: openai.embedding("text-embedding-3-small"),
     value: query,
   });
+  recordUsage?.(openAIUsage("text-embedding-3-small", "embedding", usage.tokens, 0));
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -128,9 +131,19 @@ export async function retrieveKnowledgeCandidates(
 export async function searchKnowledge(
   query: string,
   target?: string,
-  opts?: { rerank?: boolean; rerankBackend?: RerankBackend },
+  opts?: {
+    rerank?: boolean;
+    rerankBackend?: RerankBackend;
+    recordUsage?: RecordModelUsage;
+  },
 ): Promise<KnowledgePassage[]> {
-  const candidates = await retrieveKnowledgeCandidates(query, target);
+  const candidates = await retrieveKnowledgeCandidates(query, target, opts?.recordUsage);
   if (opts?.rerank === false) return candidates.slice(0, 5);
-  return rerankPassages(query, deduplicatePassages(candidates), 5, opts?.rerankBackend);
+  return rerankPassages(
+    query,
+    deduplicatePassages(candidates),
+    5,
+    opts?.rerankBackend,
+    opts?.recordUsage,
+  );
 }

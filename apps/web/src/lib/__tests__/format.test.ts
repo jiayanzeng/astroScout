@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   bortleLabel,
+  deviceTimeZoneLabel,
   formatHoursRange,
   formatLocalDateTime,
   lightSensitivityTier,
@@ -43,6 +44,30 @@ describe("formatLocalDateTime", () => {
     expect(formatLocalDateTime("2026-07-11T20:05:00Z", "Pacific/Auckland")).toBe(
       "Jul 12, 8:05 AM",
     );
+  });
+
+  it("makes Auckland planning rollover explicit on a device in another zone", () => {
+    // Auckland dusk is Sep 26 local, while the same instant is still Sep 25 on the device.
+    expect(formatLocalDateTime("2026-09-26T06:00:00Z", "America/Los_Angeles")).toBe(
+      "Sep 25, 11:00 PM",
+    );
+    expect(
+      deviceTimeZoneLabel(
+        "2026-09-26T06:00:00Z",
+        "2026-09-26T17:00:00Z",
+        "America/Los_Angeles",
+      ),
+    ).toBe("America/Los_Angeles (PDT)");
+  });
+
+  it("shows daylight-saving abbreviation changes instead of saying local time", () => {
+    expect(
+      deviceTimeZoneLabel(
+        "2026-11-01T08:30:00Z",
+        "2026-11-01T10:30:00Z",
+        "America/Los_Angeles",
+      ),
+    ).toBe("America/Los_Angeles (PDT → PST)");
   });
 });
 

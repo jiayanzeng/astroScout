@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import type { NightPlan, ProjectPlan, RankedTarget } from "@/lib/api";
 import {
   bortleLabel,
+  deviceTimeZoneLabel,
   formatHoursRange,
   formatLocalDateTime,
   lightSensitivityTier,
@@ -444,7 +445,7 @@ export function PlanClient({
                   <time dateTime={plan.dawn_utc} title={plan.dawn_utc}>
                     {formatLocalDateTime(plan.dawn_utc)}
                   </time>{" "}
-                  local time
+                  device time · {deviceTimeZoneLabel(plan.dusk_utc, plan.dawn_utc)}
                 </p>
               </div>
             )}

@@ -35,7 +35,7 @@ BASE_HOURS_BY_KIND: dict[str, tuple[float, float]] = {
 DEFAULT_BASE_HOURS: tuple[float, float] = (2.0, 4.0)
 SHOWCASE_MULTIPLIER = 2.5
 
-NON_BUDGET_KINDS = frozenset({"planet"})
+NON_BUDGET_KINDS = frozenset({"moon", "planet"})
 
 # Fraction of the sky-brightness gap a filter still exposes you to, for
 # emission-line targets. 1.0 = broadband (full LP exposure).

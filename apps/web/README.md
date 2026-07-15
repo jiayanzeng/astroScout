@@ -21,13 +21,18 @@ so run that too (`cd apps/api && uv run uvicorn astroscout_api.main:app --reload
 - `/plan` — ranked night planning, signed-in gear profiles, integration-time ranges,
   measured SQM override, session saving, and on-demand multi-night projections
 - `/sessions` — authenticated saved sessions and logged observations, protected by RLS
-- `/chat` — relay-safe Vercel AI SDK tool loop for planning, target detail, and cited
-  knowledge search
+- `/chat` — authenticated, rate-limited Vercel AI SDK tool loop with content-free
+  latency/token/cost accounting, text-only browser persistence, and cited knowledge search
 - shadcn/ui set up (`components.json`, `lib/utils.ts`, `ui/button|input|card`)
 
-Supabase migrations `0001` through `0005` must be applied in order. Database read errors
+Supabase migrations `0001` through `0006` must be applied in order. Database read errors
 are rendered explicitly on the signed-in plan/session pages instead of appearing as empty
-state.
+state. Migration `0006` is required before chat will accept requests.
+
+If a local relay or HTTPS proxy uses a CA missing from Node's trust store, install a
+verified PEM outside the repository and set `NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem`
+in the machine/shell environment before starting Next.js. Never use
+`NODE_TLS_REJECT_UNAUTHORIZED=0`, and never commit either setting to an env file.
 
 ## Checks (same as CI)
 
@@ -38,4 +43,5 @@ pnpm --filter @astroscout/web test
 pnpm --filter @astroscout/web build
 ```
 
-`/chat` needs `OPENAI_API_KEY`; everything else runs without it.
+`/chat` needs a signed-in Supabase user and `OPENAI_API_KEY`; everything else runs without
+an OpenAI key.

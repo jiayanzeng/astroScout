@@ -65,6 +65,20 @@ def test_planet_is_neutral_to_light_pollution() -> None:
     assert light_pollution_factor(9, sensitivity) == 1.0
 
 
+def test_moon_is_not_penalized_by_its_own_illumination() -> None:
+    base = TargetConditions(
+        altitude_deg=60,
+        moon_illumination=1,
+        moon_separation_deg=0,
+        hours_visible=6,
+        bortle=9,
+        light_sensitivity=light_sensitivity_for_kind("moon"),
+        is_moon=True,
+    )
+    assert light_sensitivity_for_kind("moon") == 0.0
+    assert score_target(base) == 100.0
+
+
 def test_lp_factor_pristine_is_neutral() -> None:
     assert light_pollution_factor(1, 1.0) == 1.0
     assert light_pollution_factor(1, 0.0) == 1.0

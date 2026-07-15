@@ -1,4 +1,4 @@
-"""A small built-in catalog of popular deep-sky objects and bright planets.
+"""A small built-in catalog of popular deep-sky and moving observing targets.
 
 Fixed-object coordinates are J2000 (RA hours, Dec degrees). Moving bodies carry an
 Astropy body name instead; their RA/Dec fields are unused placeholders. Keeping a
@@ -37,10 +37,12 @@ CATALOG: tuple[CatalogObject, ...] = (
     CatalogObject("M8", 18.060, -24.38, "emission nebula", "Lagoon Nebula"),
     CatalogObject("M20", 18.045, -23.03, "emission nebula", "Trifid Nebula"),
     CatalogObject("M104", 12.667, -11.62, "galaxy", "Sombrero Galaxy"),
+    CatalogObject("M4", 16.393, -26.53, "globular cluster", "Messier 4"),
     CatalogObject("Jupiter", 0.0, 0.0, "planet", "Jupiter", body="jupiter"),
     CatalogObject("Saturn", 0.0, 0.0, "planet", "Saturn", body="saturn"),
     CatalogObject("Mars", 0.0, 0.0, "planet", "Mars", body="mars"),
     CatalogObject("Venus", 0.0, 0.0, "planet", "Venus", body="venus"),
+    CatalogObject("Moon", 0.0, 0.0, "moon", "Moon", body="moon"),
 )
 
 BY_NAME: dict[str, CatalogObject] = {obj.name.upper(): obj for obj in CATALOG}

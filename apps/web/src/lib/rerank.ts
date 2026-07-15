@@ -10,6 +10,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
 
+import { openAIUsage, type RecordModelUsage } from "./chat-usage";
 import type { KnowledgePassage } from "./knowledge";
 
 export interface Reranker {
@@ -86,7 +87,10 @@ async function loadBgeRuntime(modelName: string): Promise<BgeRuntime> {
 /** Cohere Rerank — a purpose-built cross-encoder. */
 export class CohereReranker implements Reranker {
   readonly name = "cohere";
-  constructor(private readonly model = "rerank-v3.5") {}
+  constructor(
+    private readonly model = "rerank-v3.5",
+    private readonly recordUsage?: RecordModelUsage,
+  ) {}
 
   async rerank(
     query: string,
@@ -110,7 +114,18 @@ export class CohereReranker implements Reranker {
     if (!res.ok) throw new Error(`Cohere rerank ${res.status}: ${await res.text()}`);
     const json = (await res.json()) as {
       results: { index: number; relevance_score: number }[];
+      meta?: { billed_units?: { search_units?: number } };
     };
+    this.recordUsage?.({
+      provider: "cohere",
+      model: this.model,
+      operation: "rerank",
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      estimated_cost_usd: null,
+      billing_units: { search_units: json.meta?.billed_units?.search_units ?? 0 },
+    });
     return json.results.map((r) => ({ ...passages[r.index], similarity: r.relevance_score }));
   }
 }
@@ -119,13 +134,15 @@ export class CohereReranker implements Reranker {
 export class LLMReranker implements Reranker {
   readonly name = "llm";
 
+  constructor(private readonly recordUsage?: RecordModelUsage) {}
+
   async rerank(
     query: string,
     passages: KnowledgePassage[],
     topK: number,
   ): Promise<KnowledgePassage[]> {
     if (passages.length === 0) return [];
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
       model: openai("gpt-4o-mini"),
       schema: z.object({
         ranked: z.array(z.object({ index: z.number(), score: z.number() })),
@@ -137,6 +154,9 @@ export class LLMReranker implements Reranker {
         `QUERY: ${query}\n\nPASSAGES:\n` +
         passages.map((p, i) => `[${i}] ${p.content}`).join("\n"),
     });
+    this.recordUsage?.(
+      openAIUsage("gpt-4o-mini", "rerank", usage.inputTokens, usage.outputTokens),
+    );
     return object.ranked
       .filter((r) => r.index >= 0 && r.index < passages.length)
       .sort((a, b) => b.score - a.score)
@@ -204,6 +224,7 @@ export async function rerankPassages(
   passages: KnowledgePassage[],
   topK: number,
   backend?: RerankBackend,
+  recordUsage?: RecordModelUsage,
 ): Promise<KnowledgePassage[]> {
   const selected = backend ?? configuredBackend();
   if (selected === "bge") return new BgeReranker().rerank(query, passages, topK);
@@ -211,17 +232,21 @@ export async function rerankPassages(
     if (!process.env.COHERE_API_KEY) {
       throw new Error("RERANK_BACKEND=cohere requires COHERE_API_KEY.");
     }
-    return new CohereReranker().rerank(query, passages, topK);
+    return new CohereReranker("rerank-v3.5", recordUsage).rerank(query, passages, topK);
   }
   if (selected === "llm") {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("RERANK_BACKEND=llm requires OPENAI_API_KEY.");
     }
-    return new LLMReranker().rerank(query, passages, topK);
+    return new LLMReranker(recordUsage).rerank(query, passages, topK);
   }
   if (selected === "none") return passages.slice(0, topK);
 
-  if (process.env.COHERE_API_KEY) return new CohereReranker().rerank(query, passages, topK);
-  if (process.env.OPENAI_API_KEY) return new LLMReranker().rerank(query, passages, topK);
+  if (process.env.COHERE_API_KEY) {
+    return new CohereReranker("rerank-v3.5", recordUsage).rerank(query, passages, topK);
+  }
+  if (process.env.OPENAI_API_KEY) {
+    return new LLMReranker(recordUsage).rerank(query, passages, topK);
+  }
   return passages.slice(0, topK);
 }

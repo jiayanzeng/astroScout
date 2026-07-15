@@ -1,20 +1,25 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { fetchVisibility } from "@/lib/api";
+import { ApiError, fetchVisibility } from "@/lib/api";
+import { coordinates, QueryValidationError, requiredText } from "@/lib/proxy-params";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const target = searchParams.get("target");
-  const lat = Number(searchParams.get("lat"));
-  const lon = Number(searchParams.get("lon"));
-
-  if (!target || Number.isNaN(lat) || Number.isNaN(lon)) {
-    return NextResponse.json({ error: "target, lat and lon are required" }, { status: 400 });
-  }
 
   try {
+    const target = requiredText(searchParams, "target");
+    const { lat, lon } = coordinates(searchParams);
     return NextResponse.json(await fetchVisibility(target, lat, lon));
   } catch (e) {
+    if (e instanceof QueryValidationError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    if (e instanceof ApiError) {
+      return NextResponse.json(
+        { error: e.message, ...(e.detail === undefined ? {} : { detail: e.detail }) },
+        { status: e.status },
+      );
+    }
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
 }

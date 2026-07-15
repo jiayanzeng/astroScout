@@ -26,11 +26,13 @@ relay endpoints are supported via `OPENAI_BASE_URL` (v0.6.1).
   Fusion (`hybrid_search` RPC), then a **cross-encoder rerank** (Cohere or LLM) over
   the top candidates — robust to both exact identifiers and paraphrase.
 - **Auth + persistence** — Supabase magic-link auth, Postgres + row-level security,
-  saved **sessions** and logged **observations**.
+  saved **sessions** and logged **observations**; chat restores a validated, text-only
+  browser-local history with an explicit Clear action and privacy policy.
 - **Web UI** — ranked-target table with save/log, sessions list + detail, copilot.
-- **AI copilot** — Vercel AI SDK with three tools: `planNight`, `getTargetDetail`,
-  and `searchKnowledge`. The chat UI shows exactly what the copilot queried and what
-  came back — including cited literature sources — so answers are auditable.
+- **AI copilot** — authenticated, quota-protected Vercel AI SDK with three tools:
+  `planNight`, `getTargetDetail`, and `searchKnowledge`. The chat UI shows exactly what
+  the copilot queried and what came back — including cited literature sources — while
+  the server records content-free latency/token/cost data for reliability controls.
 - **Eval harness** (`apps/web/evals`) — retrieval metrics (hit@k, recall@k, MRR,
   nDCG) + answer-faithfulness scoring over a labelled dataset, comparing sparse vs
   dense vs hybrid retrieval. Runs offline (no keys) or live; pure metrics + RRF
@@ -48,7 +50,7 @@ Vercel AI SDK v6 · Supabase (auth + Postgres + pgvector + RLS) · OpenAI embedd
 
 ```bash
 # 1. Supabase — see supabase/README.md
-#    create a project, run migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005,
+#    create a project, run migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006,
 #    then enable email auth
 #    NOTE: SUPABASE_URL must be the bare project URL (https://<ref>.supabase.co) —
 #    do NOT append /rest/v1; the store client adds the REST path itself.
@@ -68,10 +70,14 @@ cp apps/web/.env.example apps/web/.env.local      # Supabase URL/anon key + OPEN
 pnpm --filter @astroscout/web dev                 # http://localhost:3000
 ```
 
-`/plan` works without an account. Signing in unlocks saving sessions and logging
-observations. `/chat` needs `OPENAI_API_KEY`; grounded answers need the knowledge base
-ingested. If ingestion hits `permission denied for table documents` (42501), grant the
-`service_role` privileges — see `STATE.md` §4 (environment quirks) for the exact SQL.
+`/plan` works without an account. Signing in unlocks saving sessions, logging observations,
+and `/chat`. Chat also needs `OPENAI_API_KEY`; grounded answers need the knowledge base
+ingested. If ingestion hits `permission denied for table documents` (42501), apply the
+canonical migrations rather than adding dashboard-only grants — see `STATE.md` §4.
+
+For a local HTTPS relay whose verified CA is not in Node&apos;s trust store, set
+`NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem` in the machine/shell environment. Do not put
+it in committed env files, and never use `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
 ## Tests / checks (mirrors CI)
 
@@ -96,9 +102,9 @@ supabase      schema + RLS + pgvector migrations, setup notes
 
 ## Honest scope notes (deliberately not in this slice)
 
-- Local cross-encoder reranker (e.g. bge-reranker) as a no-vendor option; per-passage chunk dedup.
+- Observing-site IANA timezone lookup is not yet bundled; the UI explicitly labels the
+  browser/device zone and retains UTC tooltips instead of calling it site-local time.
 - Per-target rise/set times surfaced in the UI (computed internally already).
 - Background/scheduled ingestion (currently a manual CLI run).
-- Relay support is env-only and verified for embeddings; the `/chat` + LLM-rerank paths
-  against a relay are pending verification (AI SDK v6's default OpenAI provider targets
-  the Responses API — see `STATE.md` §5).
+- Projection guards are per API process; a multi-worker deployment should also enforce a
+  gateway/distributed global limit.

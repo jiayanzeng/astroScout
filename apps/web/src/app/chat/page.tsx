@@ -9,11 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ChatMessage } from "@/lib/ai";
 import {
+  clearChatHistory,
+  readChatHistory,
+  writeChatHistory,
+} from "@/lib/chat-persistence";
+import {
   formatObserverContext,
   readObserverContext,
   writeObserverContext,
   type ObserverContext,
 } from "@/lib/observer-context";
+import { createClient } from "@/lib/supabase/client";
 
 type Part = ChatMessage["parts"][number];
 
@@ -129,20 +135,45 @@ function KnowledgeTool({ part }: { part?: Extract<Part, { type: "tool-searchKnow
 }
 
 export default function ChatPage() {
-  const { messages, sendMessage, status, error, regenerate } = useChat<ChatMessage>();
+  const { messages, setMessages, sendMessage, status, error, regenerate } = useChat<ChatMessage>();
   const [input, setInput] = useState("");
   const [observer, setObserver] = useState<ObserverContext | null>(null);
   const [observerLoaded, setObserverLoaded] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const canSend = observerLoaded && (status === "ready" || status === "error");
+  const canSend =
+    observerLoaded && authenticated === true && (status === "ready" || status === "error");
 
   useEffect(() => {
+    let active = true;
     const restore = window.setTimeout(() => {
       setObserver(readObserverContext(window.localStorage));
+      setMessages(readChatHistory(window.localStorage));
       setObserverLoaded(true);
+      setHistoryLoaded(true);
+      try {
+        void createClient()
+          .auth.getUser()
+          .then(({ data }) => {
+            if (active) setAuthenticated(Boolean(data.user));
+          })
+          .catch(() => {
+            if (active) setAuthenticated(false);
+          });
+      } catch {
+        if (active) setAuthenticated(false);
+      }
     }, 0);
-    return () => window.clearTimeout(restore);
-  }, []);
+    return () => {
+      active = false;
+      window.clearTimeout(restore);
+    };
+  }, [setMessages]);
+
+  useEffect(() => {
+    if (historyLoaded) writeChatHistory(window.localStorage, messages);
+  }, [historyLoaded, messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -161,6 +192,12 @@ export default function ChatPage() {
     void sendMessage({ text }, { body: { observer: context } });
   }
 
+  function clearConversation() {
+    clearChatHistory(window.localStorage);
+    setMessages([]);
+    setInput("");
+  }
+
   const comparisonPrompt = observer
     ? "Compare M31 and M42 for imaging tonight using my saved observer context."
     : "Compare M31 and M42 for imaging tonight; ask me to set observer coordinates first.";
@@ -168,11 +205,38 @@ export default function ChatPage() {
   return (
     <main className="mx-auto flex h-[calc(100dvh-3rem)] max-w-xl flex-col gap-4 px-4 py-8">
       <header>
-        <h1 className="text-xl font-semibold tracking-tight">AstroScout copilot</h1>
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">AstroScout copilot</h1>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={clearConversation}
+            disabled={messages.length === 0}
+          >
+            Clear conversation
+          </Button>
+        </div>
         <p className="text-muted-foreground mt-1 text-sm">
           Plan a night, inspect a target, or explore the cited astronomy literature.
         </p>
+        <p className="text-muted-foreground mt-1 text-xs">
+          Text-only history is saved in this browser; tool payloads are not. Read the{" "}
+          <Link href="/privacy" className="underline underline-offset-2">
+            chat privacy policy
+          </Link>
+          .
+        </p>
       </header>
+
+      {authenticated === false && (
+        <div role="alert" className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm">
+          <Link href="/login" className="font-medium underline underline-offset-2">
+            Sign in
+          </Link>{" "}
+          to use chat. Authentication is required for per-user abuse and cost controls.
+        </div>
+      )}
 
       <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
         {observer ? (

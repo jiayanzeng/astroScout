@@ -25,6 +25,7 @@ LP_MAX_IMPACT = 0.8
 # surface-brightness objects do not.
 _SENSITIVITY_BY_KIND: dict[str, float] = {
     "planet": 0.0,
+    "moon": 0.0,
     "open cluster": 0.15,
     "globular cluster": 0.25,
     "planetary nebula": 0.30,
@@ -64,6 +65,7 @@ class TargetConditions:
     hours_visible: float  # hours above MIN_USEFUL_ALT during the dark window
     bortle: int = 4  # observer sky brightness, 1 (pristine) .. 9 (inner city)
     light_sensitivity: float = 0.5  # how much light pollution degrades this object
+    is_moon: bool = False  # lunar observing is not penalized by the Moon itself
 
 
 def rate_target(altitude_deg: float, moon_illumination: float) -> str:
@@ -95,7 +97,7 @@ def score_target(c: TargetConditions) -> float:
 
     # Moon term: penalty grows with illumination and shrinks with separation.
     proximity = max(0.0, 1.0 - c.moon_separation_deg / 90.0)
-    moon_penalty = c.moon_illumination * proximity
+    moon_penalty = 0.0 if c.is_moon else c.moon_illumination * proximity
     moon_term = max(0.0, 1.0 - moon_penalty)
 
     base = 100.0 * (0.45 * alt_term + 0.30 * time_term + 0.25 * moon_term)

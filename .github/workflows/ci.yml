@@ -39,6 +39,8 @@ jobs:
         run: psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/0005_privileges_and_rls_repair.sql
       - name: Verify Track C privileges, CRUD, RLS, and RPC
         run: psql -X -v ON_ERROR_STOP=1 -f supabase/tests/track_c_acceptance.sql
+      - name: Verify authenticated chat quota and usage accounting
+        run: psql -X -v ON_ERROR_STOP=1 -f supabase/tests/chat_usage_acceptance.sql
 
   api:
     runs-on: ubuntu-latest

@@ -1,7 +1,15 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from astroscout_api.datasources.targets import (
+    TargetNotFound,
+    UnsupportedTarget,
+    UpstreamResolutionError,
+    resolve_target,
+)
 from astroscout_api.main import app
+from astroscout_api.protection import RateLimitResult
+from astroscout_api.routers import planning as planning_router
 
 client = TestClient(app)
 
@@ -58,6 +66,96 @@ def test_plan_project_rejects_invalid_query_values(override: str, value: object)
     }
     params[override] = value
     assert client.get("/plan/project", params=params).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    [
+        (TargetNotFound("AAA", "No target found."), 404, "target_not_found"),
+        (
+            UnsupportedTarget("Sun", "Use the solar flow.", "solar_daylight_planner_required"),
+            422,
+            "unsupported_target",
+        ),
+        (
+            UpstreamResolutionError("Alpha Centauri", "Resolver unavailable."),
+            502,
+            "upstream_resolution_error",
+        ),
+    ],
+)
+def test_plan_target_maps_resolution_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    status: int,
+    code: str,
+) -> None:
+    def fail(*_args: object) -> dict[str, object]:
+        raise error
+
+    monkeypatch.setattr(planning_router, "target_detail", fail)
+    response = client.get(
+        "/plan/target",
+        params={"name": "AAA", "lat": -36.85, "lon": 174.76},
+    )
+    assert response.status_code == status
+    assert response.json()["detail"]["code"] == code
+
+
+@pytest.mark.parametrize("name", ["M4", "Alpha Centauri"])
+def test_plan_target_preserves_successful_resolution(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    def resolved_detail(target: str, _lat: float, _lon: float, _when: object) -> dict[str, object]:
+        if target == "Alpha Centauri":
+            return {"name": target, "common_name": target, "kind": "unknown"}
+        obj = resolve_target(target)
+        return {"name": obj.name, "common_name": obj.common_name, "kind": obj.kind}
+
+    monkeypatch.setattr(planning_router, "target_detail", resolved_detail)
+    response = client.get(
+        "/plan/target",
+        params={"name": name, "lat": -36.85, "lon": 174.76},
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == name
+
+
+def test_plan_project_returns_structured_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RateLimitedGuard:
+        def check_rate(self, _client_key: str) -> RateLimitResult:
+            return RateLimitResult(allowed=False, retry_after_seconds=17)
+
+    monkeypatch.setattr(planning_router, "projection_guard", RateLimitedGuard())
+    response = client.get(
+        "/plan/project",
+        params={"name": "M42", "lat": 0, "lon": 0, "f_ratio": 5},
+    )
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "17"
+    assert response.json()["detail"]["code"] == "projection_rate_limited"
+
+
+def test_plan_project_returns_structured_capacity_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BusyGuard:
+        def check_rate(self, _client_key: str) -> RateLimitResult:
+            return RateLimitResult(allowed=True)
+
+        def acquire(self) -> bool:
+            return False
+
+    monkeypatch.setattr(planning_router, "projection_guard", BusyGuard())
+    response = client.get(
+        "/plan/project",
+        params={"name": "M42", "lat": 0, "lon": 0, "f_ratio": 5},
+    )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "2"
+    assert response.json()["detail"]["code"] == "projection_capacity_exceeded"
 
 
 # --- future-date planning end to end (astropy compute) ---
