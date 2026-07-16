@@ -153,7 +153,7 @@ Record deterministic test names, SQL acceptance where touched, and one built-art
 signed-in browser trajectory using a non-private future date/location. Preserve exact
 observed values rather than copying the historical Auckland run.
 
-### Disposition — merged/Production Ready 2026-07-16; signed-in acceptance pending
+### Disposition — merged/Production Ready 2026-07-16; signed-in acceptance deferred
 
 The immutable successful-plan snapshot, stale-input invalidation/generation guard, exact
 `planned_for` persistence, shared action validation, and discriminated mutation outcomes
@@ -179,6 +179,11 @@ leaving exactly localhost and Production callback URLs. PA-1 remains open until 
 maintainer-established Production session passes visible save, 120-minute M42 logging, and
 list/detail reload. Evidence:
 `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
+
+The maintainer then reported that Production sign-in displayed `Email rate limit
+exceeded.` and directed that the step be skipped for this session. The report was not
+independently replayed. No additional sign-in request was made. The signed-in trajectory
+is an explicit deferred to-do, not a waived acceptance criterion.
 
 ## PA-2 — make chat target policy complete and action-bounded
 

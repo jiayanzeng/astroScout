@@ -151,10 +151,20 @@ browser automation again did not dispatch React's native-date change event, so t
 not claimed as exact `2026-08-20` Production evidence. The exact future-date boundary
 remains covered by deterministic tests and the earlier Ready Preview trajectory.
 
+## Deferred signed-in acceptance
+
+The maintainer subsequently reported that Production sign-in displayed `Email rate limit
+exceeded.` This record preserves that as a maintainer-reported observation; it was not
+independently replayed in the closeout. At the maintainer's direction, no further sign-in
+request was attempted. The Production `Session saved`, 120-minute M42 log, and
+`/sessions` list/detail reload trajectory is deferred to a later task after email delivery
+is available.
+
 ## Disposition
 
 Repository implementation, merge, Ready Production deployment, anonymous hosted
 acceptance, signed-in Preview ranking/invalidation/projection, exact database insertion,
-and temporary-resource cleanup are complete on 2026-07-16. PA-1 remains open because no
-authenticated Production session was available to verify `Session saved`, 120-minute M42
-logging, and `/sessions` list/detail reload acceptance in `docs/live-acceptance.md`.
+and temporary-resource cleanup are complete on 2026-07-16. PA-1 remains open because the
+email-rate-limit report prevented an authenticated Production session from being
+established for `Session saved`, 120-minute M42 logging, and `/sessions` list/detail reload
+acceptance in `docs/live-acceptance.md`.

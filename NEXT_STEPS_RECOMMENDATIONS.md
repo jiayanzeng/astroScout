@@ -338,9 +338,9 @@ The new ledger is deliberately open:
    correction and non-secret evidence are recorded in `STATE.md` item 23 and
    `docs/evidence/2026-07-16-pa0-credential-closeout.md`.
 2. [ ] **PA-1 — immutable plan provenance and saved date (merged/Production Ready
-   2026-07-16; signed-in Production acceptance pending):** ranking, projection, observer context, and
-   save now share one immutable successful-request snapshot; `planned_for`, action
-   validation, and no-row outcomes have deterministic coverage. Close only after an
+   2026-07-16; signed-in Production acceptance deferred):** ranking, projection, observer
+   context, and save now share one immutable successful-request snapshot; `planned_for`,
+   action validation, and no-row outcomes have deterministic coverage. Close only after the
    corrected signed-in candidate passes visible save acknowledgement, 120-minute M42 log,
    and list/detail reload. Ranking, all mutable-input invalidation checks, projection, and
    the exact future-date database insert passed. The first save exposed a planner remount;
@@ -348,8 +348,11 @@ The new ledger is deliberately open:
    approved recovery removed the failed-run session and all temporary Preview resources.
    PR #1 merged as `8455b71`; exact reviewed commit `83dc651` is Ready in Production as
    deployment `HfyfLLjpFig1hVnb9LGUztLouHbg`. Production had no retained auth session, so
-   no further magic link or token transfer was attempted. The signed-in Production
-   save/log/reload trajectory remains the closeout blocker. See
+   no further magic link or token transfer was attempted. The maintainer subsequently
+   reported `Email rate limit exceeded.` on Production and directed that this step be
+   skipped for the current session. To-do: after email delivery is available, run the
+   signed-in Production save/log/list/detail reload trajectory; it remains the PA-1
+   closeout blocker. See
    `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 3. [ ] **PA-2 — complete/bounded chat target policy:** cover all 21 supported targets and
    common aliases, preserve Sun/Moon behavior, and ensure required actions plus final

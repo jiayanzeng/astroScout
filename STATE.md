@@ -1272,7 +1272,7 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     failed because worker port binding was denied; the permitted reruns passed.
 
 24. ⚠️ **PA-1 — immutable planner provenance (Merged and Production Ready 2026-07-16;
-    signed-in Production acceptance pending).** The
+    signed-in Production acceptance deferred after email-rate-limit report).** The
     web now stores each successful `NightPlan` with a frozen
     request snapshot containing coordinates, requested/effective date, location source,
     selected profile identity and gear inputs, and measured SQM. Ranking and projection
@@ -1331,16 +1331,21 @@ taxonomy, and corpus-ingestion deduplication remain open or deliberately blocked
     auth token was copied between hosts. The existing Preview session was used only to
     delete temporary gear `PA-1 acceptance f5`. The stable branch callback and remote
     review branch were then removed. Supabase callback measurement now contains exactly
-    localhost and Production. Corrected `Session saved`, 120-minute M42 logging, and
-    `/sessions` list/detail reload are still unverified on the Production origin and remain
-    required before PA-1 closes. Evidence:
+    localhost and Production.
+
+    On 2026-07-16 the maintainer reported that Production sign-in displayed `Email rate
+    limit exceeded.` This closeout did not independently replay the message. At the
+    maintainer's direction, no further sign-in request was attempted and the acceptance was
+    deferred. Open to-do: after the provider email window resets or an approved delivery
+    path is available, establish a Production session and verify corrected `Session saved`,
+    a 120-minute M42 log, and `/sessions` list/detail reload before closing PA-1. Evidence:
     `docs/evidence/2026-07-16-pa1-repository-evidence.md`.
 
 ### Post-audit production-closeout workstream (opened 2026-07-15)
 
 - [x] **PA-0 release operations:** revoke/replace the exposed relay credential and verify
   the deployed Supabase key class, with no credential value recorded.
-- [ ] **PA-1 planner provenance (merged/Production Ready; signed-in acceptance pending):**
+- [ ] **PA-1 planner provenance (merged/Production Ready; signed-in acceptance deferred):**
   bind
   ranking/projection/save to one immutable request context, persist the actual future
   `planned_for` date, and validate mutation outcomes.
